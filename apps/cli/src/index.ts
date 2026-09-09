@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import { describeCore } from '@devpilot/core';
 import { registerProjectCommand } from './commands/project.js';
+import { registerContextCommand } from './commands/context.js';
 
 const program = new Command();
 
@@ -24,5 +25,6 @@ program
   });
 
 registerProjectCommand(program);
+registerContextCommand(program);
 
 program.parse(process.argv);

@@ -17,11 +17,11 @@ interface IgnoreInstance {
 }
 const ignoreFactory = require('ignore') as () => IgnoreInstance;
 
-// Recorrido de árbol de archivos del Scanner (ver 04): respeta `.gitignore`
-// y un `.devpilotignore` adicional del proyecto, más una lista de
-// ignorados por defecto que no depende de que el usuario tenga un
-// `.gitignore` bien configurado (ej. proyectos sin `node_modules` en su
-// `.gitignore` porque nunca lo necesitaron hasta ahora).
+// Recorrido de árbol de archivos (Scanner y Context Planner, ver 04):
+// respeta `.gitignore` y un `.devpilotignore` adicional del proyecto, más
+// una lista de ignorados por defecto que no depende de que el usuario
+// tenga un `.gitignore` bien configurado (ej. proyectos sin `node_modules`
+// en su `.gitignore` porque nunca lo necesitaron hasta ahora).
 const DEFAULT_IGNORES = [
   '.git',
   '.devpilot',
@@ -42,6 +42,12 @@ export interface WalkResult {
   languageCounts: Record<string, number>;
 }
 
+export interface ProjectFileEntry {
+  relPath: string; // separadores '/' siempre, sin importar la plataforma
+  absPath: string;
+  sizeBytes: number;
+}
+
 function loadIgnoreFile(rootPath: string, fileName: string): string[] {
   try {
     const raw = readFileSync(path.join(rootPath, fileName), 'utf8');
@@ -51,20 +57,22 @@ function loadIgnoreFile(rootPath: string, fileName: string): string[] {
   }
 }
 
-/**
- * Recorre `rootPath` de forma síncrona (los proyectos objetivo de v1 son de
- * tamaño normal, no monorepos gigantes — ver 04) contando archivos y
- * lenguajes. No devuelve la lista completa de rutas: el índice detallado
- * (tabla `files`) es responsabilidad del Indexer, no del Scanner.
- */
-export function walkProjectFiles(rootPath: string): WalkResult {
+function buildIgnore(rootPath: string): IgnoreInstance {
   const ig = ignoreFactory();
   ig.add(DEFAULT_IGNORES);
   ig.add(loadIgnoreFile(rootPath, '.gitignore'));
   ig.add(loadIgnoreFile(rootPath, '.devpilotignore'));
+  return ig;
+}
 
-  let fileCount = 0;
-  const languageCounts: Record<string, number> = {};
+/**
+ * Recorrido síncrono compartido: invoca `onFile` para cada archivo no
+ * ignorado. Los proyectos objetivo de v1 son de tamaño normal, no
+ * monorepos gigantes (ver 04) — recorrido síncrono recursivo es
+ * suficiente.
+ */
+function walkTree(rootPath: string, onFile: (relPath: string, absPath: string) => void): void {
+  const ig = buildIgnore(rootPath);
 
   const walk = (dir: string): void => {
     let entries: string[];
@@ -92,15 +100,50 @@ export function walkProjectFiles(rootPath: string): WalkResult {
       if (stat.isDirectory()) {
         walk(absPath);
       } else if (stat.isFile()) {
-        fileCount += 1;
-        const language = detectLanguage(entry);
-        if (language) {
-          languageCounts[language] = (languageCounts[language] ?? 0) + 1;
-        }
+        onFile(posixRelPath, absPath);
       }
     }
   };
 
   walk(rootPath);
+}
+
+/**
+ * Usado por el Scanner: cuenta archivos y lenguajes sin devolver la lista
+ * completa de rutas (el índice detallado en SQLite es responsabilidad del
+ * Indexer, no del Scanner — ver 04).
+ */
+export function walkProjectFiles(rootPath: string): WalkResult {
+  let fileCount = 0;
+  const languageCounts: Record<string, number> = {};
+
+  walkTree(rootPath, (relPath) => {
+    fileCount += 1;
+    const language = detectLanguage(relPath);
+    if (language) {
+      languageCounts[language] = (languageCounts[language] ?? 0) + 1;
+    }
+  });
+
   return { fileCount, languageCounts };
+}
+
+/**
+ * Usado por el Context Planner (Nivel 1 — ver 04): lista de candidatos
+ * sobre la que correr la búsqueda textual. Devuelve rutas, no contenido —
+ * el llamador decide qué leer y cómo (tamaño máximo, detección de
+ * binarios, etc.).
+ */
+export function listProjectFiles(rootPath: string): ProjectFileEntry[] {
+  const files: ProjectFileEntry[] = [];
+  walkTree(rootPath, (relPath, absPath) => {
+    let sizeBytes = 0;
+    try {
+      sizeBytes = statSync(absPath).size;
+    } catch {
+      return;
+    }
+    files.push({ relPath, absPath, sizeBytes });
+  });
+  return files;
 }

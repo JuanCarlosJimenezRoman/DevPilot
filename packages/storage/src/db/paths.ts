@@ -31,3 +31,7 @@ export function getProjectStateDir(rootPath: string): string {
 export function getProjectSnapshotPath(rootPath: string): string {
   return path.join(getProjectStateDir(rootPath), 'snapshot.json');
 }
+
+export function getProjectContextDir(rootPath: string): string {
+  return path.join(getProjectDevpilotDir(rootPath), 'context');
+}

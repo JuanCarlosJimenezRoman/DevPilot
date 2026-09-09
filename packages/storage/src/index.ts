@@ -12,6 +12,8 @@ export * from './db/schema.js';
 export * from './db/connection.js';
 export * from './repos/projectRegistryRepo.js';
 export * from './repos/projectStateRepo.js';
+export * from './repos/contextPackRepo.js';
 export * from './files/snapshotStore.js';
+export * from './files/contextPackStore.js';
 
 export const STORAGE_PACKAGE_VERSION = '0.0.1';

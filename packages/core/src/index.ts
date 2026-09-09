@@ -9,6 +9,7 @@ import { createLogger } from '@devpilot/shared';
 export * from '@devpilot/shared';
 
 export * from './project/index.js';
+export * from './context/index.js';
 
 const logger = createLogger('core');
 
