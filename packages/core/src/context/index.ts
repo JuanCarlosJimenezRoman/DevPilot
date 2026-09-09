@@ -14,3 +14,4 @@ export * from './changeParser.js';
 export * from './undocumentedDecision.js';
 export * from './changeValidator.js';
 export * from './importService.js';
+export * from './diffService.js';

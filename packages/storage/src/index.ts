@@ -16,5 +16,6 @@ export * from './repos/contextPackRepo.js';
 export * from './repos/fileChangeProposalRepo.js';
 export * from './files/snapshotStore.js';
 export * from './files/contextPackStore.js';
+export * from './files/changeProposalStore.js';
 
 export const STORAGE_PACKAGE_VERSION = '0.0.1';

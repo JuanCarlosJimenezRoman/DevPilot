@@ -139,6 +139,15 @@ CREATE TABLE IF NOT EXISTS file_change_proposals (
   search_matched            INTEGER,
   search_match_strategy     TEXT,
   has_undocumented_decision INTEGER NOT NULL DEFAULT 0,
+  -- .devpilot/changes/<id>.json -- contenido completo de la propuesta
+  -- (FileChangeProposal + ValidationResult), ver changeProposalStore.ts.
+  -- Agregada al implementar devpilot diff: esta tabla solo tenia
+  -- metadata, y diff/apply necesitan el contenido real (newContent/diff/
+  -- patch), que no se conservaba en ningun otro lado. Nullable solo para
+  -- no romper filas insertadas por versiones anteriores del codigo sin
+  -- migrar (ver ensureFileChangeProposalPathColumn en connection.ts);
+  -- toda fila nueva la trae siempre.
+  proposal_path             TEXT,
   applied                   INTEGER NOT NULL DEFAULT 0,
   created_at                TEXT NOT NULL
 );

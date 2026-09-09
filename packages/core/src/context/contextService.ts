@@ -73,6 +73,18 @@ export async function buildAndPersistContext(
 
   const { markdownPath, jsonPath } = await writeContextPackFiles(rootPath, pack, markdown);
 
+  // Bug real encontrado al implementar `devpilot diff` en una sesión
+  // distinta a la que generó el Context Pack (ver diffService.ts/07): estas
+  // rutas son absolutas en el momento de escribirse, y `rootPath` puede
+  // venir de un punto de montaje que no es estable entre sesiones (p.ej. el
+  // puente de dispositivo de Cowork). Guardar la ruta absoluta en SQLite
+  // rompe justo la garantía de portabilidad que 03 promete explícitamente
+  // ("si el usuario mueve o comparte la carpeta... su conocimiento viaja
+  // con ella") — si el usuario mueve el proyecto, la ruta absoluta vieja
+  // ya no sirve aunque el archivo siga ahí, relativo a la nueva raíz. Se
+  // persiste relativo a `rootPath`; quien lea la fila (import/diff) la
+  // resuelve de vuelta a absoluta contra el `rootPath` *actual*, no el de
+  // cuando se generó.
   const projectDb = openProjectDb(rootPath);
   try {
     insertContextPack(projectDb, {
@@ -81,8 +93,8 @@ export async function buildAndPersistContext(
       createdAt: pack.createdAt,
       tokenEstimate: pack.tokenEstimate.totalTokens,
       classification: pack.tokenEstimate.classification,
-      markdownPath,
-      jsonPath,
+      markdownPath: path.relative(rootPath, markdownPath),
+      jsonPath: path.relative(rootPath, jsonPath),
     });
   } finally {
     projectDb.close();

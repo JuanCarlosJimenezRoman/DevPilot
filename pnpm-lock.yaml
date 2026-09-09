@@ -47,6 +47,9 @@ importers:
       '@devpilot/storage':
         specifier: workspace:*
         version: link:../storage
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       ignore:
         specifier: ^6.0.2
         version: 6.0.2
@@ -414,6 +417,10 @@ packages:
 
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
+
+  diff@9.0.0:
+    resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
+    engines: {node: '>=0.3.1'}
 
   esbuild@0.28.2:
     resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
@@ -1004,6 +1011,8 @@ snapshots:
       ms: 2.1.3
 
   deep-is@0.1.4: {}
+
+  diff@9.0.0: {}
 
   esbuild@0.28.2:
     optionalDependencies:

@@ -15,6 +15,13 @@ function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, '\n');
 }
 
+/** Construye el patrón de regex compartido por `dedentTolerantIncludes` y `findDedentTolerantMatch`: cada línea del candidato, comparada por su contenido recortado (trim), con indentación de cabecera libre en el archivo real. `null` si el candidato es puro espacio en blanco (nunca "coincide" — evita falsos positivos triviales). */
+function buildDedentTolerantPattern(candidate: string): string | null {
+  const candidateLines = normalizeNewlines(candidate).split('\n');
+  if (candidateLines.every((l) => l.trim() === '')) return null;
+  return candidateLines.map((line) => `[ \\t]*${escapeRegExp(line.trim())}`).join('\\n');
+}
+
 /**
  * ¿`candidate` aparece, línea por línea, dentro de `fileContent`? Cada
  * línea del candidato se compara por su contenido recortado (trim), con
@@ -25,14 +32,41 @@ function normalizeNewlines(text: string): string {
  * positivos triviales.
  */
 export function dedentTolerantIncludes(candidate: string, fileContent: string): boolean {
-  const candidateLines = normalizeNewlines(candidate).split('\n');
-  if (candidateLines.every((l) => l.trim() === '')) return false;
-
-  const pattern = candidateLines.map((line) => `[ \\t]*${escapeRegExp(line.trim())}`).join('\\n');
+  const pattern = buildDedentTolerantPattern(candidate);
+  if (pattern === null) return false;
   try {
     const re = new RegExp(pattern);
     return re.test(normalizeNewlines(fileContent));
   } catch {
     return false;
+  }
+}
+
+export interface DedentTolerantMatch {
+  /** Offset de inicio/fin (exclusivo) del match, en `fileContent` ya normalizado a `\n` (ver `normalizeNewlines` — quien construya el reemplazo debe normalizar `fileContent` con el mismo criterio antes de usar estos offsets). */
+  start: number;
+  end: number;
+}
+
+/**
+ * Igual que `dedentTolerantIncludes`, pero devuelve dónde coincidió en vez
+ * de solo si coincidió — lo que necesita `devpilot diff`/`devpilot apply`
+ * (ver `diffService.ts`) para reconstruir el archivo completo reemplazando
+ * exactamente esa región por el bloque `REPLACE`, en vez de solo confirmar
+ * que el `SEARCH` era válido (que es todo lo que necesitaba el
+ * `ChangeValidator`). Misma noción de "coincide" que `search-match` — un
+ * solo patrón compartido entre ambas funciones, para no arriesgar que
+ * diverjan silenciosamente.
+ */
+export function findDedentTolerantMatch(candidate: string, fileContent: string): DedentTolerantMatch | null {
+  const pattern = buildDedentTolerantPattern(candidate);
+  if (pattern === null) return null;
+  try {
+    const re = new RegExp(pattern);
+    const match = re.exec(normalizeNewlines(fileContent));
+    if (!match) return null;
+    return { start: match.index, end: match.index + match[0].length };
+  } catch {
+    return null;
   }
 }

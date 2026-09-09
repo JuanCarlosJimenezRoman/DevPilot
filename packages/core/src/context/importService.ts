@@ -11,6 +11,7 @@ import {
   insertFileChangeProposal,
   openGlobalRegistryDb,
   openProjectDb,
+  writeChangeProposalFile,
 } from '@devpilot/storage';
 import { parseAiResponse } from './changeParser.js';
 import { validateChange } from './changeValidator.js';
@@ -78,7 +79,18 @@ export async function importChanges(params: ImportChangesParams): Promise<Import
     );
   }
 
-  const packJsonRaw = await readFile(contextPackRow.jsonPath, 'utf8');
+  // contextPackRow.jsonPath es relativo a rootPath (ver contextService.ts y
+  // contextPackRepo.ts) — se resuelve contra el rootPath actual, no el que
+  // haya tenido el proceso que generó el pack.
+  const packJsonAbsPath = path.resolve(rootPath, contextPackRow.jsonPath);
+  let packJsonRaw: string;
+  try {
+    packJsonRaw = await readFile(packJsonAbsPath, 'utf8');
+  } catch (err) {
+    throw new Error(
+      `No se pudo leer el Context Pack (${contextPackRow.id}) en ${packJsonAbsPath}: ${(err as Error).message}. Vuelve a correr \`devpilot context\` si el archivo ya no existe.`,
+    );
+  }
   const contextPack = JSON.parse(packJsonRaw) as ContextPack;
 
   const raw = await readRawResponse(params.input);
@@ -97,8 +109,19 @@ export async function importChanges(params: ImportChangesParams): Promise<Import
       const markerCheck = validation.checks.find((c) => c.name === 'marker-well-formed');
       const undocumentedCheck = validation.checks.find((c) => c.name === 'undocumented-decision');
 
+      // El contenido real de la propuesta (newContent/diff/patch) no cabe
+      // como columna consultable (03) — se persiste aparte (ver
+      // changeProposalStore.ts) porque `devpilot diff`/`devpilot apply`
+      // necesitan reconstruirlo, y la respuesta cruda de la IA en sí no se
+      // guarda en ningún otro lado.
+      const proposalId = randomUUID();
+      const proposalAbsPath = await writeChangeProposalFile(rootPath, proposalId, { proposal, validation });
+      // Mismo motivo que contextService.ts: se guarda relativo a rootPath,
+      // nunca absoluto (portabilidad — 03).
+      const proposalPath = path.relative(rootPath, proposalAbsPath);
+
       insertFileChangeProposal(projectDb2, {
-        id: randomUUID(),
+        id: proposalId,
         contextPackId: contextPackRow.id,
         filePath: proposal.path,
         operation: proposal.operation,
@@ -115,6 +138,7 @@ export async function importChanges(params: ImportChangesParams): Promise<Import
             : 'recovered-prefix'
           : null,
         hasUndocumentedDecision: undocumentedCheck ? !undocumentedCheck.passed : false,
+        proposalPath,
         createdAt: now,
       });
     }

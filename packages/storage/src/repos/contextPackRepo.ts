@@ -14,6 +14,13 @@ export interface ContextPackRow {
   createdAt: string;
   tokenEstimate: number;
   classification: string;
+  // Relativas al rootPath del proyecto, NO absolutas (ver contextService.ts
+  // — bug real de portabilidad encontrado al implementar `devpilot diff`:
+  // una ruta absoluta guardada en SQLite deja de servir si el proyecto se
+  // mueve, o si la misma carpeta se monta con un prefijo distinto entre
+  // sesiones). Quien las use debe resolverlas con `path.resolve(rootPath,
+  // row.jsonPath)` contra el rootPath *actual*, no asumir que ya son
+  // absolutas.
   markdownPath: string;
   jsonPath: string;
 }

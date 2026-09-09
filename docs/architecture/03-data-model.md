@@ -133,6 +133,13 @@ CREATE TABLE context_packs (
   created_at      TEXT NOT NULL,
   token_estimate  INTEGER,
   classification  TEXT,             -- 'green' | 'yellow' | 'red'
+  -- markdown_path/json_path son RELATIVOS a rootPath, no absolutos (bug real
+  -- de portabilidad encontrado al implementar devpilot diff: una ruta
+  -- absoluta guardada aqui deja de servir si el proyecto se mueve, o si la
+  -- misma carpeta se monta con un prefijo distinto entre sesiones -- rompe
+  -- justo la garantia de portabilidad de este documento, ver mas arriba).
+  -- Quien lea la fila los resuelve con path.resolve(rootPath, ...) contra
+  -- el rootPath ACTUAL, nunca el de cuando se generaron.
   markdown_path   TEXT NOT NULL,
   json_path       TEXT NOT NULL
 );
@@ -151,6 +158,15 @@ CREATE TABLE file_change_proposals (
   search_matched            INTEGER,           -- solo para operation='patch': ¿el bloque SEARCH coincidió con el archivo actual? NULL si no aplica
   search_match_strategy     TEXT,              -- 'exact' | 'dedented' | 'recovered-prefix' | NULL — cómo se logró el match (ver 06, segunda ronda de evidencia)
   has_undocumented_decision INTEGER NOT NULL DEFAULT 0,  -- hallazgo del Paso 0: heurística de decisión de negocio no documentada
+  -- .devpilot/changes/<id>.json -- contenido completo de la propuesta
+  -- (FileChangeProposal + ValidationResult: newContent/diff/patch), que no
+  -- cabe como columna consultable. Agregada al implementar devpilot diff:
+  -- sin esto no habia forma de reconstruir el diff real, solo la metadata
+  -- de como se clasifico. RELATIVA a rootPath, mismo motivo que
+  -- markdown_path/json_path en context_packs (arriba). Nullable solo para
+  -- no romper filas insertadas antes de este cambio (migracion via
+  -- ALTER TABLE, ver connection.ts).
+  proposal_path             TEXT,
   applied                   INTEGER NOT NULL DEFAULT 0,
   created_at                TEXT NOT NULL
 );
@@ -233,6 +249,8 @@ CREATE INDEX idx_relevance_task ON relevance_cache(task_hash);
 ├── context/
 │   ├── 2026-09-09-task-001.md
 │   └── 2026-09-09-task-001.json
+├── changes/               # una fila de file_change_proposals por archivo <id>.json (agregado con devpilot diff)
+│   └── <proposal-id>.json
 └── config.json            # allowlist de comandos, pesos del relevance scorer, límites de tokens, etc.
 ```
 

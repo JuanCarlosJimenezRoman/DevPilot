@@ -11,6 +11,7 @@
   "dependencies": {
     "@devpilot/shared": "workspace:*",
     "@devpilot/storage": "workspace:*",
+    "diff": "^9.0.0",
     "ignore": "^6.0.2"
   }
 }

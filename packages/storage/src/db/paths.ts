@@ -35,3 +35,8 @@ export function getProjectSnapshotPath(rootPath: string): string {
 export function getProjectContextDir(rootPath: string): string {
   return path.join(getProjectDevpilotDir(rootPath), 'context');
 }
+
+/** `.devpilot/changes/<proposal-id>.json` — contenido completo de cada `FileChangeProposal` + su `ValidationResult` (ver `changeProposalStore.ts`). La fila en `file_change_proposals` (03) solo guarda metadata consultable; el contenido real (necesario para reconstruir el diff en `devpilot diff`/`devpilot apply`) vive aquí, mismo principio que `context/` para los Context Packs. */
+export function getProjectChangesDir(rootPath: string): string {
+  return path.join(getProjectDevpilotDir(rootPath), 'changes');
+}
