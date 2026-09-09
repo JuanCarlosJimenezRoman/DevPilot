@@ -1,4 +1,3 @@
-import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { createLogger } from '@devpilot/shared';
@@ -12,8 +11,7 @@ import {
   openProjectDb,
   readChangeProposalFile,
 } from '@devpilot/storage';
-import { safeReadTextFile } from './fileReading.js';
-import { findDedentTolerantMatch } from './matching.js';
+import { reconstructChangeContent } from './changeReconstruction.js';
 
 const logger = createLogger('core:diff');
 
@@ -22,69 +20,12 @@ const logger = createLogger('core:diff');
 // → Apply". `devpilot import` clasifica pero nunca aplica; `devpilot diff`
 // muestra qué cambiaría realmente en disco si se aplicara cada propuesta —
 // sigue sin tocar nada, es pura lectura — para que el usuario decida antes
-// de que exista `devpilot apply` (que sí necesitará Tool Engine, ver 05).
-
-function normalizeNewlines(text: string): string {
-  return text.replace(/\r\n/g, '\n');
-}
-
-/**
- * Reconstruye `{ oldContent, newContent }` según la operación de la
- * propuesta, o un mensaje de error legible si no se puede (archivo
- * inexistente para edit/delete/patch, SEARCH que ya no matchea, etc.).
- * Deliberadamente reutiliza la misma tolerancia de matching que el
- * `ChangeValidator` (`findDedentTolerantMatch`, ver matching.ts) — un
- * patch que pasó `search-match` en `devpilot import` debe seguir
- * pudiéndose reconstruir aquí sin volver a decidir si "coincide".
- */
-function reconstructContents(
-  proposal: FileChangeProposal,
-  absPath: string,
-): { oldContent: string; newContent: string } | { error: string } {
-  const exists = existsSync(absPath) && statSync(absPath).isFile();
-  let oldContent = '';
-  if (exists) {
-    const read = safeReadTextFile(absPath);
-    if (read === null) {
-      return { error: 'No se pudo leer el archivo real (¿binario o demasiado grande?) para construir el diff.' };
-    }
-    oldContent = normalizeNewlines(read);
-  }
-
-  switch (proposal.operation) {
-    case 'create':
-      return { oldContent, newContent: normalizeNewlines(proposal.newContent ?? '') };
-
-    case 'delete':
-      if (!exists) return { error: 'El archivo ya no existe — nada que borrar.' };
-      return { oldContent, newContent: '' };
-
-    case 'patch': {
-      if (!proposal.patch) return { error: 'No hay un bloque SEARCH/REPLACE reconocible en esta propuesta.' };
-      if (!exists) return { error: 'El archivo no existe — no hay contra qué aplicar el patch.' };
-      const match = findDedentTolerantMatch(proposal.patch.search, oldContent);
-      if (!match) {
-        return {
-          error:
-            'El fragmento SEARCH no se ubica en el contenido actual del archivo (coincide con `search-match` en `devpilot import` — probablemente el archivo cambió desde entonces).',
-        };
-      }
-      const newContent =
-        oldContent.slice(0, match.start) + normalizeNewlines(proposal.patch.replace) + oldContent.slice(match.end);
-      return { oldContent, newContent };
-    }
-
-    case 'edit':
-    default: {
-      // formatos de archivo completo: 'devpilot-block', 'markdown-file', 'fence-only'.
-      // ('diff' se maneja aparte en buildDiffEntry — ya es un diff, no hay nada que reconstruir.)
-      if (proposal.newContent === undefined) {
-        return { error: 'No hay contenido nuevo para comparar contra el archivo real.' };
-      }
-      return { oldContent, newContent: normalizeNewlines(proposal.newContent) };
-    }
-  }
-}
+// de aplicar con `devpilot apply` (que sí necesita Tool Engine, ver 05).
+//
+// La reconstrucción de "qué contenido resultaría de esto" vive en
+// changeReconstruction.ts, compartida con applyService.ts — incluye ahora
+// `format: 'diff'` (antes se mostraba tal cual sin validar nada contra el
+// archivo real; ver 07, hallazgo de la sesión de `devpilot diff`).
 
 export interface FileDiffEntry {
   proposalId: string;
@@ -124,30 +65,7 @@ function buildDiffEntry(
 ): FileDiffEntry {
   const absPath = path.resolve(rootPath, proposal.path);
 
-  // format='diff': la propia respuesta de la IA ya trae un diff unificado
-  // (ver changeParser.ts, extractMarkdownFileBlocks) — no hay
-  // oldContent/newContent que reconstruir línea a línea, se muestra tal
-  // cual, solo reetiquetado. Nota: a diferencia de los demás formatos,
-  // el ChangeValidator (06) no tiene hoy un check que compare este diff
-  // contra el archivo real (ni search-match ni whole-file-boundary-match
-  // aplican a `operation='edit', format='diff'`) — es una superficie sin
-  // cubrir, documentada aquí y en 07 como candidato a revisar antes de
-  // que exista `devpilot apply` para este formato específico.
-  if (proposal.operation === 'edit' && proposal.format === 'diff' && proposal.diff) {
-    return {
-      proposalId,
-      filePath: proposal.path,
-      operation: proposal.operation,
-      format: proposal.format,
-      validationStatus,
-      confidence,
-      diffText: proposal.diff.trimEnd() + '\n',
-      buildError: null,
-      failingChecks,
-    };
-  }
-
-  const contents = reconstructContents(proposal, absPath);
+  const contents = reconstructChangeContent(proposal, absPath);
   if ('error' in contents) {
     return {
       proposalId,

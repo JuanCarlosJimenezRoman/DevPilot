@@ -15,3 +15,5 @@ export * from './undocumentedDecision.js';
 export * from './changeValidator.js';
 export * from './importService.js';
 export * from './diffService.js';
+export * from './changeReconstruction.js';
+export * from './applyService.js';

@@ -10,6 +10,7 @@ export * from '@devpilot/shared';
 
 export * from './project/index.js';
 export * from './context/index.js';
+export * from './tools/index.js';
 
 const logger = createLogger('core');
 

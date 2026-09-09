@@ -1,5 +1,14 @@
 # 05 — Tool Engine y seguridad (Fase G)
 
+## Nota de implementación (2026-09-09, `devpilot apply` — ver 07)
+
+Este documento es el diseño original (Fase G); la primera implementación real llegó con `devpilot apply` (Incremento 1), que es la primera vez que DevPilot escribe algo en el disco del usuario. El detalle completo de la validación está en 07; acá solo lo que difiere o restringe el diseño de abajo:
+
+- Implementado en `packages/core/src/tools/permissionGuard.ts`. Cubre únicamente `create_file` / `edit_file` / `apply_patch` (riesgo `write`) y `delete_file` (riesgo `delete`) — los únicos que `devpilot apply` necesita hoy. `run_command` (`TERMINAL`) y `git_commit` (`GIT_COMMIT`) siguen sin código: no hay todavía ningún consumidor real de esos dos, así que `RiskLevel` en el código es por ahora solo `'write' | 'delete'`, no la unión completa de seis niveles de la interfaz de diseño de abajo. Se amplía cuando exista un comando que de verdad ejecute terminal o commits.
+- `PathGuard` no quedó como módulo separado — en la práctica es un solo chequeo ("¿la ruta resuelta cae dentro de `project.rootPath`?") integrado en la misma `evaluatePermission()` de `PermissionGuard`. Se evalúa dos veces: al armar el plan de aplicación y otra vez justo antes de escribir a disco (`applyChange`), como defensa en profundidad real.
+- `requiresApproval` es siempre `true` en la implementación actual — no existe todavía ninguna herramienta con aprobación automática además de `READ`/`SEARCH` (que ni siquiera pasan por `PermissionGuard`), así que ese campo no varía en la práctica hasta que se implemente algo de riesgo `read` fuera del root.
+- El flag `--yes-to write` mencionado abajo como posibilidad ya existe tal cual en `devpilot apply`, y `delete` en efecto nunca es bypassable — se valida explícitamente en el CLI (rechaza `--yes-to delete` con un error antes de construir el plan).
+
 ## Herramientas y niveles de riesgo
 
 Refino la tabla original agregando una categoría `NETWORK` (llamadas salientes) y aclarando que incluso `READ` fuera del root del proyecto requiere aprobación (no solo escritura):

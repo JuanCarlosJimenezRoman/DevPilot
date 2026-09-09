@@ -102,11 +102,16 @@ export function listFileChangeProposalsByContextPack(
   return rows.map((row) => rowToProposal(row as FileChangeProposalDbRow));
 }
 
-/** Usado por `devpilot apply` (próxima pieza, ver 07) para recuperar y marcar una propuesta puntual por id. */
+/** Usado por `devpilot apply` para recuperar y marcar una propuesta puntual por id. */
 export function getFileChangeProposalById(
   db: DatabaseSync,
   id: string,
 ): (FileChangeProposalRow & { applied: boolean }) | null {
   const row = db.prepare('SELECT * FROM file_change_proposals WHERE id = ?').get(id) as unknown | undefined;
   return row ? rowToProposal(row as FileChangeProposalDbRow) : null;
+}
+
+/** `devpilot apply` (ver 07): marca una propuesta como aplicada una vez que el Tool Engine escribió el cambio de verdad en disco. Nunca se desmarca — es un hecho histórico, no un estado editable. */
+export function markFileChangeProposalApplied(db: DatabaseSync, id: string): void {
+  db.prepare('UPDATE file_change_proposals SET applied = 1 WHERE id = ?').run(id);
 }
