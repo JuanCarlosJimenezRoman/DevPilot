@@ -1,0 +1,26 @@
+{
+  "name": "devpilot",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "DevPilot — capa local de contexto, memoria y herramientas para proyectos de software, agnóstica del proveedor de IA (BYOAI).",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "devpilot": "tsx apps/cli/src/index.ts",
+    "dev:cli": "tsx watch apps/cli/src/index.ts",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.15.0",
+    "@types/node": "^22.10.1",
+    "eslint": "^9.15.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.15.0"
+  }
+}

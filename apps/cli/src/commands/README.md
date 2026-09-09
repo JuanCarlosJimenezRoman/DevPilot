@@ -1,0 +1,1 @@
+Comandos reales del **Incremento 1**: `project add`, `context`, `import`, `diff`, `apply`, `decide` — ver `docs/architecture/07-roadmap.md`. Cada comando es un módulo aparte aquí, registrado desde `apps/cli/src/index.ts`, y no contiene lógica de negocio propia — llama a los servicios de `@devpilot/core`.
