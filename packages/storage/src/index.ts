@@ -13,6 +13,7 @@ export * from './db/connection.js';
 export * from './repos/projectRegistryRepo.js';
 export * from './repos/projectStateRepo.js';
 export * from './repos/contextPackRepo.js';
+export * from './repos/fileChangeProposalRepo.js';
 export * from './files/snapshotStore.js';
 export * from './files/contextPackStore.js';
 

@@ -33,3 +33,38 @@ export function insertContextPack(db: DatabaseSync, row: ContextPackRow): void {
     row.jsonPath,
   );
 }
+
+interface ContextPackDbRow {
+  id: string;
+  task_text: string;
+  created_at: string;
+  token_estimate: number;
+  classification: string;
+  markdown_path: string;
+  json_path: string;
+}
+
+function rowToContextPack(row: ContextPackDbRow): ContextPackRow {
+  return {
+    id: row.id,
+    taskText: row.task_text,
+    createdAt: row.created_at,
+    tokenEstimate: row.token_estimate,
+    classification: row.classification,
+    markdownPath: row.markdown_path,
+    jsonPath: row.json_path,
+  };
+}
+
+/** Usado por `devpilot import` (ver 07): sin que el usuario tenga que acordarse del id, se asume que está importando la respuesta al Context Pack más reciente de este proyecto. */
+export function getLatestContextPack(db: DatabaseSync): ContextPackRow | null {
+  const row = db.prepare('SELECT * FROM context_packs ORDER BY created_at DESC LIMIT 1').get() as
+    | unknown
+    | undefined;
+  return row ? rowToContextPack(row as ContextPackDbRow) : null;
+}
+
+export function getContextPackById(db: DatabaseSync, id: string): ContextPackRow | null {
+  const row = db.prepare('SELECT * FROM context_packs WHERE id = ?').get(id) as unknown | undefined;
+  return row ? rowToContextPack(row as ContextPackDbRow) : null;
+}
