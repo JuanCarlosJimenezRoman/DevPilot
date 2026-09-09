@@ -120,7 +120,7 @@ devpilot/
 
 ## Contratos TypeScript principales (Fase E)
 
-Estos son los tipos de dominio centrales. Viven en `packages/core/src/domain/`.
+Estos son los tipos de dominio centrales. Viven en `packages/shared/src/domain/` (movidos ahí durante la implementación del Scanner del Incremento 1: tanto `@devpilot/core` como `@devpilot/storage` los necesitan, y `@devpilot/core` depende de `@devpilot/storage` — dejarlos en `core` habría creado una dependencia circular. `@devpilot/shared` no depende de nada, así que es el lugar correcto en el grafo. `@devpilot/core` re-exporta todo desde su propio índice para no romper la ruta de import pública `@devpilot/core` que usa el resto del código, CLI incluido).
 
 ```ts
 // ---- Proyecto ----

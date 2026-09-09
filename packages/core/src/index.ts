@@ -1,6 +1,14 @@
 import { createLogger } from '@devpilot/shared';
 
-export * from './domain/index.js';
+// Los contratos de dominio (Project, ProjectSnapshot, ProjectState, etc.)
+// viven en @devpilot/shared, no aquí — ver el comentario en
+// packages/shared/src/domain/types.ts para el porqué (evitar una
+// dependencia circular con @devpilot/storage). Se re-exportan tal cual
+// para no romper la ruta de import pública `@devpilot/core` que ya usa
+// el resto del código (CLI incluido).
+export * from '@devpilot/shared';
+
+export * from './project/index.js';
 
 const logger = createLogger('core');
 

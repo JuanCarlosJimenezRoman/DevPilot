@@ -26,13 +26,17 @@ SQLite guarda **metadata consultable** (índices, referencias, estado, bitácora
 
 ```sql
 CREATE TABLE projects (
-  id            TEXT PRIMARY KEY,        -- uuid
-  name          TEXT NOT NULL,
-  root_path     TEXT NOT NULL UNIQUE,
-  created_at    TEXT NOT NULL,
-  last_opened_at TEXT
+  id              TEXT PRIMARY KEY,        -- uuid
+  name            TEXT NOT NULL,
+  root_path       TEXT NOT NULL UNIQUE,
+  vcs             TEXT NOT NULL DEFAULT 'none',   -- 'git' | 'none'
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  last_opened_at  TEXT
 );
 ```
+
+(Corregido durante la implementación del Scanner: la versión original de esta tabla no tenía `vcs` ni `updated_at`, y no coincidía con el tipo de dominio `Project` — ver `packages/shared/src/domain/types.ts`. `updated_at` cambia con cualquier actualización del registro; `last_opened_at` es específicamente la última vez que `devpilot project add` tocó ese proyecto.)
 
 `projects/<project-id>/cache.json` existe solo como optimización: permite que `devpilot project list` muestre un resumen (stack detectado, última actividad) sin tener que abrir la base de datos de cada proyecto uno por uno. Es descartable y regenerable — nunca se lee como fuente de verdad, siempre se reconstruye desde `<proyecto>/.devpilot/` si falta o está desactualizado. El "proyecto activo" vive en `config/preferences.json`, no en `registry.db`, porque es una preferencia de sesión del usuario, no un dato del catálogo de proyectos.
 
@@ -40,6 +44,8 @@ CREATE TABLE projects (
 
 ```sql
 -- Estado general del proyecto (fila única, o clave/valor genérica)
+-- El tipo de dominio ProjectState (ver packages/shared/src/domain/types.ts)
+-- incluye snapshotPath para reflejar exactamente esta columna.
 CREATE TABLE project_state (
   project_id              TEXT PRIMARY KEY,
   last_indexed_commit     TEXT,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { describeCore } from '@devpilot/core';
+import { registerProjectCommand } from './commands/project.js';
 
 const program = new Command();
 
@@ -21,5 +22,7 @@ program
     console.log(describeCore());
     console.log(`Node.js: ${process.version}`);
   });
+
+registerProjectCommand(program);
 
 program.parse(process.argv);

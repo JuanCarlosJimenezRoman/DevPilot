@@ -4,6 +4,15 @@
 // (05) ni de Provider Layer / ChangeValidator (06) — esos se agregan
 // cuando el Incremento 1 implemente esos módulos, para no mantener tipos
 // sin uso que puedan desalinearse de los docs mientras tanto.
+//
+// Viven en @devpilot/shared (no en @devpilot/core) porque tanto
+// @devpilot/storage como @devpilot/core necesitan estos tipos, y
+// @devpilot/core depende de @devpilot/storage — ponerlos en core habría
+// creado una dependencia circular. @devpilot/shared no depende de nada,
+// así que es el lugar correcto en el grafo de dependencias.
+// @devpilot/core sigue re-exportando todo esto desde su propio índice
+// (ver packages/core/src/index.ts) para no romper la ruta de import
+// pública `@devpilot/core` que ya usa el resto del código.
 
 // ---------------------------------------------------------------------
 // Proyecto
@@ -53,6 +62,9 @@ export interface ProjectState {
   lastDeepAnalysisCommit: string | null;
   lastScanAt: string | null;
   snapshotVersion: number;
+  // Ruta al snapshot persistido (.devpilot/state/snapshot.json, ver 03).
+  // null antes del primer `devpilot project add` exitoso.
+  snapshotPath: string | null;
 }
 
 export interface DecisionRecord {

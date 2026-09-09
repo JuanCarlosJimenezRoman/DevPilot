@@ -1,11 +1,17 @@
-// Placeholder del paquete de almacenamiento (SQLite + FileStore). El
-// esquema completo — registro global en ~/.devpilot/, base por proyecto en
-// <proyecto>/.devpilot/devpilot.db, y el FileStore para knowledge/context/
-// sessions/decisions — está diseñado en full en
-// docs/architecture/03-data-model.md. Se implementa a partir del Scanner
-// del Incremento 1 (ver docs/architecture/07-roadmap.md), no en este
-// andamiaje: este paquete existe ya como frontera de import válida para
-// que @devpilot/core pueda depender de él desde ahora sin que el
-// Incremento 1 tenga que reestructurar el monorepo.
+// @devpilot/storage — SQLite (registro global + base por proyecto) y
+// FileStore (contenido largo en disco). Ver docs/architecture/03-data-model.md.
+//
+// A partir del Scanner del Incremento 1, este paquete deja de ser un
+// placeholder: expone la conexión a ambas bases, los repos de `projects` /
+// `project_state`, y el snapshot store. El resto de repos/FileStore
+// (knowledge, decisions, sessions, context packs, benchmarks) se agrega
+// cuando el incremento correspondiente los necesite (ver 07).
+
+export * from './db/paths.js';
+export * from './db/schema.js';
+export * from './db/connection.js';
+export * from './repos/projectRegistryRepo.js';
+export * from './repos/projectStateRepo.js';
+export * from './files/snapshotStore.js';
 
 export const STORAGE_PACKAGE_VERSION = '0.0.1';

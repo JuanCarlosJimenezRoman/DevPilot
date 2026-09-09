@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@devpilot/shared": "workspace:*",
-    "@devpilot/storage": "workspace:*"
+    "@devpilot/storage": "workspace:*",
+    "ignore": "^6.0.2"
   }
 }
