@@ -8,9 +8,12 @@ import {
   findProjectByRootPath,
   getContextPackById,
   getLatestContextPack,
+  getTaskBenchmarkByContextPackId,
   insertFileChangeProposal,
+  listFileChangeProposalsByContextPack,
   openGlobalRegistryDb,
   openProjectDb,
+  updateTaskBenchmarkAfterImport,
   writeChangeProposalFile,
 } from '@devpilot/storage';
 import { parseAiResponse } from './changeParser.js';
@@ -141,6 +144,27 @@ export async function importChanges(params: ImportChangesParams): Promise<Import
         proposalPath,
         createdAt: now,
       });
+    }
+
+    // Benchmark automático por tarea (ver contextService.ts para la fila
+    // inicial): acá se conoce por primera vez el tamaño de la respuesta
+    // cruda de la IA y cuántos cambios se importaron. `changesImported` se
+    // recalcula sobre TODAS las propuestas del pack (no solo las de esta
+    // corrida) para que quede correcto incluso si `devpilot import` se
+    // corre más de una vez contra el mismo Context Pack.
+    const benchmark = getTaskBenchmarkByContextPackId(projectDb2, contextPackRow.id);
+    if (benchmark) {
+      const totalProposals = listFileChangeProposalsByContextPack(projectDb2, contextPackRow.id).length;
+      updateTaskBenchmarkAfterImport(projectDb2, benchmark.id, {
+        responseSizeChars: raw.length,
+        changesImported: totalProposals,
+      });
+    } else {
+      // No debería pasar con un Context Pack generado por una versión
+      // actual de `devpilot context` — solo ocurre con packs de antes de
+      // que existiera el benchmark automático. No es un error: simplemente
+      // no hay fila que actualizar.
+      logger.debug('sin fila de benchmark para este Context Pack (pack generado antes del benchmark automático):', contextPackRow.id);
     }
   } finally {
     projectDb2.close();

@@ -6,6 +6,7 @@ import { registerContextCommand } from './commands/context.js';
 import { registerImportCommand } from './commands/import.js';
 import { registerDiffCommand } from './commands/diff.js';
 import { registerApplyCommand } from './commands/apply.js';
+import { registerBenchmarkCommand } from './commands/benchmark.js';
 
 const program = new Command();
 
@@ -32,5 +33,6 @@ registerContextCommand(program);
 registerImportCommand(program);
 registerDiffCommand(program);
 registerApplyCommand(program);
+registerBenchmarkCommand(program);
 
 program.parse(process.argv);

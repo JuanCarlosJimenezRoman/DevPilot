@@ -7,12 +7,14 @@ import {
   findProjectByRootPath,
   getContextPackById,
   getLatestContextPack,
+  getTaskBenchmarkByContextPackId,
   insertToolInvocation,
   listFileChangeProposalsByContextPack,
   markFileChangeProposalApplied,
   openGlobalRegistryDb,
   openProjectDb,
   readChangeProposalFile,
+  updateTaskBenchmarkAfterApply,
 } from '@devpilot/storage';
 import { reconstructChangeContent } from './changeReconstruction.js';
 import { evaluatePermission, toolNameForOperation } from '../tools/permissionGuard.js';
@@ -320,6 +322,81 @@ export async function applyChange(rootPath: string, entry: ApplyPlanEntry, appro
     markFileChangeProposalApplied(projectDb, entry.proposalId);
 
     return { approved: true, ok: true, resultSummary };
+  } finally {
+    projectDb.close();
+  }
+}
+
+export interface ApplyRunSummary {
+  /** Cuántas escrituras/borrados fallaron de verdad (excepción al tocar disco) en ESTA corrida de `devpilot apply` — ver el porqué en el comentario de abajo. */
+  erroresEnEstaCorrida: number;
+}
+
+/**
+ * Benchmark automático por tarea (03/04, cierre del Incremento 1 — ver 07):
+ * se llama una vez al final de cada corrida de `devpilot apply`, después de
+ * procesar todas las entradas del plan, y recalcula todo lo que depende de
+ * qué se aplicó de verdad — `files_used` (archivos con al menos un cambio
+ * `applied = 1`), `changes_applied`, y `outcome`.
+ *
+ * `outcome` se decide así:
+ *   - `not_applied`: nada se aplicó todavía y esta corrida no tuvo errores
+ *     (el usuario simplemente no aprobó nada, o todo seguía en `warning`
+ *     sin `--include-warnings`).
+ *   - `failed`: nada se aplicó Y esta corrida sí tuvo al menos un error real
+ *     al escribir/borrar (permiso denegado, disco lleno, etc. — ver
+ *     `applyChange`). Se pasa `erroresEnEstaCorrida` desde el CLI en vez de
+ *     reconstruirlo desde `tool_invocations` porque esa tabla no guarda a
+ *     qué Context Pack pertenece cada invocación (ver 03) — el conteo en
+ *     memoria de la corrida que sí lo sabe es más simple y más confiable
+ *     que intentar correlacionarlo después por `params_json`.
+ *   - `success`: se aplicaron TODAS las propuestas elegibles (`valid` +
+ *     `warning`, nunca `reject`) de este pack, sin importar si fue en esta
+ *     corrida o en corridas anteriores.
+ *   - `partial`: se aplicó al menos una, pero no todas las elegibles
+ *     (incluye el caso normal de `warning`s que el usuario decidió no
+ *     incluir todavía con `--include-warnings`).
+ *
+ * Si el Context Pack no tiene fila de benchmark (packs generados antes de
+ * que existiera esta pieza), no hay nada que actualizar — no es un error.
+ */
+export async function recordApplyBenchmark(
+  rootPath: string,
+  contextPackId: string,
+  runSummary: ApplyRunSummary,
+): Promise<void> {
+  const projectDb = openProjectDb(rootPath);
+  try {
+    const benchmark = getTaskBenchmarkByContextPackId(projectDb, contextPackId);
+    if (!benchmark) {
+      logger.debug('sin fila de benchmark para este Context Pack, nada que actualizar:', contextPackId);
+      return;
+    }
+
+    const proposals = listFileChangeProposalsByContextPack(projectDb, contextPackId);
+    const eligible = proposals.filter((p) => p.validationStatus !== 'reject');
+    const appliedProposals = proposals.filter((p) => p.applied);
+    const filesUsed = new Set(appliedProposals.map((p) => p.filePath)).size;
+    const changesImported = proposals.length;
+    const changesApplied = appliedProposals.length;
+    const filesUnnecessary = Math.max((benchmark.filesIncluded ?? 0) - filesUsed, 0);
+
+    let outcome: string;
+    if (changesApplied === 0) {
+      outcome = runSummary.erroresEnEstaCorrida > 0 ? 'failed' : 'not_applied';
+    } else if (eligible.length > 0 && changesApplied === eligible.length) {
+      outcome = 'success';
+    } else {
+      outcome = 'partial';
+    }
+
+    updateTaskBenchmarkAfterApply(projectDb, benchmark.id, {
+      filesUsed,
+      filesUnnecessary,
+      changesImported,
+      changesApplied,
+      outcome,
+    });
   } finally {
     projectDb.close();
   }

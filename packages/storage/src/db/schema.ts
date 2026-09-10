@@ -163,7 +163,16 @@ CREATE TABLE IF NOT EXISTS context_pack_decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_pack_decisions_pack ON context_pack_decisions(context_pack_id);
 
--- Benchmark por tarea
+-- Benchmark por tarea (ver 07, "devpilot apply" + benchmark automático):
+-- una fila por Context Pack, creada al correr devpilot context y
+-- actualizada (nunca insertada de nuevo) al correr devpilot import y
+-- devpilot apply sobre ese mismo pack -- así el benchmark queda
+-- disponible progresivamente sin necesitar un paso explícito de "cerrar
+-- tarea". No hay UNIQUE en context_pack_id a propósito: bases de proyecto
+-- ya existentes tenían esta tabla creada (CREATE TABLE IF NOT EXISTS desde
+-- el Incremento 0, sin usarse) sin esa restricción, y agregarla ahora no
+-- la aplicaría retroactivamente -- el "upsert" (una fila por pack) se
+-- garantiza en código (taskBenchmarkRepo.ts), no en el esquema.
 CREATE TABLE IF NOT EXISTS task_benchmarks (
   id                    TEXT PRIMARY KEY,
   context_pack_id       TEXT REFERENCES context_packs(id) ON DELETE CASCADE,
@@ -178,6 +187,7 @@ CREATE TABLE IF NOT EXISTS task_benchmarks (
   outcome               TEXT,
   created_at            TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_benchmarks_pack ON task_benchmarks(context_pack_id);
 
 -- Bitácora de auditoría de herramientas (todo lo que pasó por el Tool Engine)
 CREATE TABLE IF NOT EXISTS tool_invocations (

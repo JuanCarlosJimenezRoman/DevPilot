@@ -4,8 +4,9 @@
 // A partir del Scanner del Incremento 1, este paquete deja de ser un
 // placeholder: expone la conexión a ambas bases, los repos de `projects` /
 // `project_state`, y el snapshot store. El resto de repos/FileStore
-// (knowledge, decisions, sessions, context packs, benchmarks) se agrega
-// cuando el incremento correspondiente los necesite (ver 07).
+// (knowledge, decisions, sessions) se agrega cuando el incremento
+// correspondiente los necesite (ver 07); context packs, propuestas de
+// cambio, invocaciones de herramientas y benchmarks por tarea ya están.
 
 export * from './db/paths.js';
 export * from './db/schema.js';
@@ -15,6 +16,7 @@ export * from './repos/projectStateRepo.js';
 export * from './repos/contextPackRepo.js';
 export * from './repos/fileChangeProposalRepo.js';
 export * from './repos/toolInvocationRepo.js';
+export * from './repos/taskBenchmarkRepo.js';
 export * from './files/snapshotStore.js';
 export * from './files/contextPackStore.js';
 export * from './files/changeProposalStore.js';

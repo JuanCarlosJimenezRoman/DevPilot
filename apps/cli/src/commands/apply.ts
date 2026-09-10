@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import type { Command } from 'commander';
-import { applyChange, buildApplyPlan } from '@devpilot/core';
+import { applyChange, buildApplyPlan, recordApplyBenchmark } from '@devpilot/core';
 
 const STATUS_LABEL: Record<string, string> = {
   valid: '✅ valid',
@@ -208,6 +208,13 @@ export function registerApplyCommand(program: Command): void {
           console.log(
             `Resumen: ${results.applied} aplicados, ${results.rejectedByUser} rechazados por el usuario, ${results.errores} con error, ${results.saltados} saltados.`,
           );
+
+          // Benchmark automático por tarea (03/04, ver 07) — se actualiza al
+          // final de cada corrida, tenga o no cambios elegibles (si todo se
+          // saltó, igual queda constancia de que se corrió `apply`).
+          await recordApplyBenchmark(plan.rootPath, plan.contextPackId, {
+            erroresEnEstaCorrida: results.errores,
+          });
         } catch (err) {
           console.error(`Error al aplicar: ${(err as Error).message}`);
           process.exitCode = 1;

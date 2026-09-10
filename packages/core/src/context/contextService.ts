@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createLogger } from '@devpilot/shared';
 import type { ContextPack } from '@devpilot/shared';
 import {
   findProjectByRootPath,
   insertContextPack,
+  insertTaskBenchmark,
   openGlobalRegistryDb,
   openProjectDb,
   readSnapshotFile,
@@ -95,6 +97,27 @@ export async function buildAndPersistContext(
       classification: pack.tokenEstimate.classification,
       markdownPath: path.relative(rootPath, markdownPath),
       jsonPath: path.relative(rootPath, jsonPath),
+    });
+
+    // Benchmark automático por tarea (03/04, cierre del Incremento 1 — ver
+    // 07): una fila por Context Pack, creada acá con lo único que ya se
+    // sabe en este momento (tarea, tokens estimados, archivos incluidos).
+    // `devpilot import`/`devpilot apply` la van completando después — no
+    // existe un paso explícito de "cerrar tarea", el benchmark refleja el
+    // estado más reciente conocido para este pack.
+    insertTaskBenchmark(projectDb, {
+      id: randomUUID(),
+      contextPackId: pack.id,
+      taskText: pack.task.rawText,
+      contextTokens: pack.tokenEstimate.totalTokens,
+      filesIncluded: pack.relevantFiles.length,
+      filesUsed: null,
+      filesUnnecessary: null,
+      responseSizeChars: null,
+      changesImported: 0,
+      changesApplied: 0,
+      outcome: 'not_applied',
+      createdAt: pack.createdAt,
     });
   } finally {
     projectDb.close();
