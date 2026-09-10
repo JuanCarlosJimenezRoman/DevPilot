@@ -145,6 +145,24 @@ export interface ContextPack {
   relevantFiles: { path: string; content: string; score: RelevanceScore }[];
   recentChanges?: GitDiff; // Incremento 3
   decisionsConsidered: DecisionRecord[];
+  // Session Memory real (Incremento 2, ver 07/sessionService.ts) — solo
+  // presente cuando había una sesión activa (`devpilot session start`) al
+  // generar este pack; `undefined` en cualquier otro caso (Session Memory
+  // es opcional, no un requisito para `devpilot context`). Cuando está,
+  // `sessionId` de arriba es el id real de esa sesión (fila en `sessions`,
+  // no un id de un solo uso); `events` viene ya acotado a los más
+  // recientes (ver contextService.ts) para no inflar el pack con todo el
+  // historial de una sesión larga.
+  sessionMemory?: SessionMemory;
+  // Texto ya inlineado de los `projectKnowledge` de arriba, listo para el
+  // Markdown/prompt (Incremento 2, ver 07/knowledgeService.ts) — mismo
+  // patrón que `businessDecisions.confirmed` respecto de
+  // `decisionsConsidered`: el array de `projectKnowledge` es metadata para
+  // auditoría (apunta al archivo real en `.devpilot/knowledge/`, no
+  // duplica su contenido — ver 03), esto es el contenido real que ve la
+  // IA. `undefined`/vacío si el proyecto todavía no tiene ningún knowledge
+  // doc (`devpilot knowledge generate`/`edit` no se corrieron todavía).
+  projectKnowledgeText?: string;
   // Añadido tras el Paso 0 (ver docs/architecture/01-vision-and-validation.md
   // y 04): decirle a la IA de antemano qué está decidido y qué está
   // deliberadamente abierto reduce cuánto necesita inventar.

@@ -79,6 +79,16 @@ export function renderContextPackMarkdown(
   snapshot: ProjectSnapshot,
 ): string {
   const lines: string[] = [];
+  // Numeración de secciones por contador en vez de números hardcodeados:
+  // varias secciones son condicionales (Restricciones, y desde esta pieza
+  // Memoria de sesión), y mantener a mano qué número le toca a cada una
+  // según cuáles están presentes se vuelve frágil apenas se agrega una
+  // nueva (exactamente lo que pasó al sumar la sección de sesión).
+  let sectionNumber = 0;
+  const nextSection = (title: string): string => {
+    sectionNumber += 1;
+    return `## ${sectionNumber}. ${title}`;
+  };
 
   lines.push(`# Context Pack — ${project.name}`);
   lines.push('');
@@ -87,7 +97,7 @@ export function renderContextPackMarkdown(
   lines.push('---');
   lines.push('');
 
-  lines.push('## 1. Información del proyecto');
+  lines.push(nextSection('Información del proyecto'));
   lines.push('');
   lines.push(`- **Nombre:** ${project.name}`);
   lines.push(`- **Stack:** ${stackLine(snapshot)}`);
@@ -95,12 +105,47 @@ export function renderContextPackMarkdown(
   if (snapshot.gitCommit) lines.push(`- **Commit actual:** \`${snapshot.gitCommit}\``);
   lines.push('');
 
-  lines.push('## 2. Tarea del usuario');
+  if (pack.projectKnowledge.length > 0) {
+    lines.push(nextSection('Project Knowledge'));
+    lines.push('');
+    lines.push(
+      '*(Memoria de largo plazo del proyecto — arquitectura, convenciones, etc. Generada por heurísticas del Scanner o editada a mano; ver `devpilot knowledge list`. Siempre completa, no filtrada por relevancia a esta tarea puntual.)*',
+    );
+    lines.push('');
+    lines.push(pack.projectKnowledgeText ?? '');
+    lines.push('');
+  }
+
+  lines.push(nextSection('Tarea del usuario'));
   lines.push('');
   lines.push('> ' + pack.task.rawText.split('\n').join('\n> '));
   lines.push('');
 
-  lines.push('## 3. Decisiones del negocio');
+  if (pack.sessionMemory) {
+    lines.push(nextSection('Memoria de sesión'));
+    lines.push('');
+    lines.push(
+      `*(Sesión activa \`${pack.sessionMemory.id}\`, iniciada ${pack.sessionMemory.startedAt} — ver \`devpilot session show ${pack.sessionMemory.id}\` para el log completo.)*`,
+    );
+    lines.push('');
+    if (pack.sessionMemory.taskSummary) {
+      lines.push(`**Resumen:** ${pack.sessionMemory.taskSummary}`);
+      lines.push('');
+    }
+    if (pack.sessionMemory.events.length === 0) {
+      lines.push('*(sin eventos registrados todavía en esta sesión)*');
+    } else {
+      lines.push(`Últimos ${pack.sessionMemory.events.length} evento(s) de esta sesión:`);
+      lines.push('');
+      for (const event of pack.sessionMemory.events) {
+        const detailText = event.detail ? ` — ${JSON.stringify(event.detail)}` : '';
+        lines.push(`- \`${event.timestamp}\` **${event.kind}**${detailText}`);
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push(nextSection('Decisiones del negocio'));
   lines.push('');
   if (pack.businessDecisions.confirmed.length === 0 && pack.businessDecisions.open.length === 0) {
     lines.push(
@@ -126,14 +171,13 @@ export function renderContextPackMarkdown(
   lines.push('');
 
   if (pack.constraints.length > 0) {
-    lines.push('## 4. Restricciones de alcance');
+    lines.push(nextSection('Restricciones de alcance'));
     lines.push('');
     for (const item of pack.constraints) lines.push(`- ${item}`);
     lines.push('');
   }
 
-  const filesHeading = pack.constraints.length > 0 ? '5' : '4';
-  lines.push(`## ${filesHeading}. Archivos relevantes`);
+  lines.push(nextSection('Archivos relevantes'));
   lines.push('');
   lines.push(
     '*(Relevancia calculada por Nivel 1 + Nivel 2 del Context Planner: coincidencia de texto/nombre de ruta + imports directos. Nivel 3/4 — símbolos AST y Git — no aplican todavía, ver roadmap.)*',
@@ -157,15 +201,13 @@ export function renderContextPackMarkdown(
     }
   }
 
-  const tokensHeading = pack.constraints.length > 0 ? '6' : '5';
-  lines.push(`## ${tokensHeading}. Estimación de tokens`);
+  lines.push(nextSection('Estimación de tokens'));
   lines.push('');
   const emoji = CLASSIFICATION_EMOJI[pack.tokenEstimate.classification];
   lines.push(`**≈ ${pack.tokenEstimate.totalTokens} tokens estimados** (caracteres/4) → ${emoji} \`${pack.tokenEstimate.classification}\`.`);
   lines.push('');
 
-  const instructionsHeading = pack.constraints.length > 0 ? '7' : '6';
-  lines.push(`## ${instructionsHeading}. Instrucciones de formato de respuesta`);
+  lines.push(nextSection('Instrucciones de formato de respuesta'));
   lines.push('');
   lines.push(pack.responseInstructions);
   lines.push('');

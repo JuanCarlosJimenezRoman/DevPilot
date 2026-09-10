@@ -11,6 +11,9 @@ export * from '@devpilot/shared';
 export * from './project/index.js';
 export * from './context/index.js';
 export * from './tools/index.js';
+export * from './decisions/index.js';
+export * from './sessions/index.js';
+export * from './knowledge/index.js';
 
 const logger = createLogger('core');
 

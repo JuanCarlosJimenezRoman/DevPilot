@@ -80,7 +80,17 @@ CREATE TABLE IF NOT EXISTS symbols (
 CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_id);
 
--- Índice de Project Knowledge (el contenido vive en .devpilot/knowledge/*.md)
+-- Indice de Project Knowledge (el contenido vive en .devpilot/knowledge/*.md,
+-- ver knowledgeStore.ts). id decide la identidad del doc: para los 5 tipos
+-- canonicos (architecture/modules/database/business-rules/conventions),
+-- id = type, asi que a lo sumo un doc activo por tipo canonico es una
+-- garantia de esquema (PRIMARY KEY), no solo de aplicacion -- "regenerar"
+-- (devpilot knowledge generate) y "crear" son el mismo upsert por id (ver
+-- knowledgeRepo.ts). Los docs custom usan id custom-<slug>.
+-- NOTA: sin backticks en este comentario -- este bloque SQL vive dentro de
+-- un template literal de JS mas abajo en el archivo, y un backtick cierra
+-- ese literal antes de tiempo (bug real ya encontrado y documentado en una
+-- sesion anterior).
 CREATE TABLE IF NOT EXISTS knowledge_docs (
   id           TEXT PRIMARY KEY,
   type         TEXT NOT NULL,

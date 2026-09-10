@@ -7,6 +7,9 @@ import { registerImportCommand } from './commands/import.js';
 import { registerDiffCommand } from './commands/diff.js';
 import { registerApplyCommand } from './commands/apply.js';
 import { registerBenchmarkCommand } from './commands/benchmark.js';
+import { registerDecideCommand } from './commands/decide.js';
+import { registerSessionCommand } from './commands/session.js';
+import { registerKnowledgeCommand } from './commands/knowledge.js';
 
 const program = new Command();
 
@@ -34,5 +37,8 @@ registerImportCommand(program);
 registerDiffCommand(program);
 registerApplyCommand(program);
 registerBenchmarkCommand(program);
+registerDecideCommand(program);
+registerSessionCommand(program);
+registerKnowledgeCommand(program);
 
 program.parse(process.argv);

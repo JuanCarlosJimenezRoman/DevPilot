@@ -18,6 +18,7 @@ import {
 } from '@devpilot/storage';
 import { parseAiResponse } from './changeParser.js';
 import { validateChange } from './changeValidator.js';
+import { logSessionEvent } from '../sessions/sessionEventLogger.js';
 
 const logger = createLogger('core:import');
 
@@ -171,6 +172,16 @@ export async function importChanges(params: ImportChangesParams): Promise<Import
   }
 
   logger.debug('import procesado', changes.length, 'cambio(s), contextPack:', contextPackRow.id);
+
+  await logSessionEvent(rootPath, 'import', {
+    contextPackId: contextPackRow.id,
+    changesCount: changes.length,
+    byStatus: {
+      valid: changes.filter((c) => c.validation.status === 'valid').length,
+      warning: changes.filter((c) => c.validation.status === 'warning').length,
+      reject: changes.filter((c) => c.validation.status === 'reject').length,
+    },
+  });
 
   return {
     contextPackId: contextPackRow.id,

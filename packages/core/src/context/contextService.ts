@@ -1,19 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createLogger } from '@devpilot/shared';
-import type { ContextPack } from '@devpilot/shared';
+import type { ContextPack, SessionMemory } from '@devpilot/shared';
+import type { SessionRow } from '@devpilot/storage';
 import {
   findProjectByRootPath,
+  getActiveSession,
   insertContextPack,
+  insertContextPackDecision,
   insertTaskBenchmark,
+  listDecisions,
   openGlobalRegistryDb,
   openProjectDb,
+  readSessionEvents,
   readSnapshotFile,
   writeContextPackFiles,
 } from '@devpilot/storage';
 import { buildContextPack, DEFAULT_MAX_FILES } from './contextPackBuilder.js';
 import { renderContextPackMarkdown } from './markdownRenderer.js';
 import { copyToClipboard } from './clipboard.js';
+import { findRelevantDecisions, toDecisionRecord } from '../decisions/decisionService.js';
+import { logSessionEvent } from '../sessions/sessionEventLogger.js';
+import { listProjectKnowledgeWithContent, toProjectKnowledgeDoc } from '../knowledge/knowledgeService.js';
+
+// Cuántos eventos recientes de la sesión activa se incluyen en el pack
+// (04: Session Memory es memoria de CORTO plazo — un resumen, no el log
+// completo). Una sesión larga puede acumular decenas de eventos; solo los
+// últimos son relevantes para "qué veníamos haciendo" en el momento de
+// generar este Context Pack puntual.
+const MAX_SESSION_EVENTS_IN_PACK = 10;
 
 const logger = createLogger('core:context');
 
@@ -61,6 +76,57 @@ export async function buildAndPersistContext(
     );
   }
 
+  // Decision Records reales relevantes a esta tarea (04, "Confirmadas se
+  // llena, a partir del Incremento 2, desde `decisions`") — se abre y
+  // cierra la base acá mismo, separado del open/close de más abajo (mismo
+  // patrón que importService.ts, que también abre la base del proyecto
+  // más de una vez dentro de la misma función).
+  const decisionsDb = openProjectDb(rootPath);
+  let relevantDecisionRows;
+  try {
+    relevantDecisionRows = findRelevantDecisions(params.taskText, listDecisions(decisionsDb));
+  } finally {
+    decisionsDb.close();
+  }
+  const relevantDecisions = relevantDecisionRows.map((row) => toDecisionRecord(row, project.id));
+
+  // Session Memory real (04/07, Incremento 2): si hay una sesión activa
+  // para este proyecto, se incluye como ingrediente del pack — resumen
+  // corto + los últimos eventos de su log (04: "Session Memory relevante"
+  // combinada por el ContextPackBuilder). Si no hay ninguna activa, sigue
+  // el comportamiento de antes de esta pieza (sessionId de un solo uso,
+  // sin sessionMemory) — Session Memory es opcional.
+  const sessionDb = openProjectDb(rootPath);
+  let activeSession: SessionRow | null;
+  try {
+    activeSession = getActiveSession(sessionDb);
+  } finally {
+    sessionDb.close();
+  }
+  let sessionMemory: SessionMemory | undefined;
+  if (activeSession) {
+    const allEvents = await readSessionEvents(rootPath, activeSession.id);
+    sessionMemory = {
+      id: activeSession.id,
+      projectId: project.id,
+      startedAt: activeSession.startedAt,
+      endedAt: activeSession.endedAt ?? undefined,
+      taskSummary: activeSession.taskSummary ?? undefined,
+      providerUsed: activeSession.providerUsed ?? undefined,
+      events: allEvents.slice(-MAX_SESSION_EVENTS_IN_PACK),
+    };
+  }
+
+  // Project Knowledge (04/07, Incremento 2, última pieza): siempre
+  // completo, sin filtrar por relevancia (ver el comentario en
+  // contextPackBuilder.ts) — cardinalidad chica por diseño, así que no
+  // hace falta el mismo matching por keywords que decisions/sessions.
+  const knowledgeRows = await listProjectKnowledgeWithContent(rootPath);
+  const knowledgeDocs = knowledgeRows.map((row) => ({
+    doc: toProjectKnowledgeDoc(row, project.id),
+    content: row.content,
+  }));
+
   const { pack, candidateCount } = buildContextPack({
     project,
     snapshot,
@@ -68,6 +134,10 @@ export async function buildAndPersistContext(
     confirmedDecisions: params.confirmedDecisions ?? [],
     openDecisions: params.openDecisions ?? [],
     constraints: params.constraints ?? [],
+    relevantDecisions,
+    sessionId: activeSession?.id,
+    sessionMemory,
+    knowledgeDocs,
     maxFiles: params.maxFiles ?? DEFAULT_MAX_FILES,
   });
 
@@ -91,6 +161,7 @@ export async function buildAndPersistContext(
   try {
     insertContextPack(projectDb, {
       id: pack.id,
+      sessionId: activeSession?.id ?? null,
       taskText: pack.task.rawText,
       createdAt: pack.createdAt,
       tokenEstimate: pack.tokenEstimate.totalTokens,
@@ -119,12 +190,54 @@ export async function buildAndPersistContext(
       outcome: 'not_applied',
       createdAt: pack.createdAt,
     });
+
+    // `context_pack_decisions` (03): qué decisiones de negocio se
+    // consideraron en este pack — separado en su propia tabla para poder
+    // consultarlo con SQL (ej. `devpilot decide show` cuenta en cuántos
+    // packs se usó cada Decision Record) sin tener que abrir el JSON del
+    // pack. Se insertan desde las fuentes originales (no desde
+    // `pack.businessDecisions.confirmed`, que ya viene aplanada a texto y
+    // no distingue una Decision Record real de algo tipeado a mano).
+    for (const decision of relevantDecisions) {
+      insertContextPackDecision(projectDb, {
+        id: randomUUID(),
+        contextPackId: pack.id,
+        kind: 'confirmed',
+        text: `${decision.title} — ${decision.decision}`,
+        resolvedDecisionId: decision.id,
+      });
+    }
+    for (const text of params.confirmedDecisions ?? []) {
+      insertContextPackDecision(projectDb, {
+        id: randomUUID(),
+        contextPackId: pack.id,
+        kind: 'confirmed',
+        text,
+        resolvedDecisionId: null,
+      });
+    }
+    for (const text of params.openDecisions ?? []) {
+      insertContextPackDecision(projectDb, {
+        id: randomUUID(),
+        contextPackId: pack.id,
+        kind: 'open',
+        text,
+        resolvedDecisionId: null,
+      });
+    }
   } finally {
     projectDb.close();
   }
 
   const copiedToClipboard = copyToClipboard(markdown);
   logger.debug('context pack generado', pack.id, 'archivos:', pack.relevantFiles.length);
+
+  await logSessionEvent(rootPath, 'context', {
+    contextPackId: pack.id,
+    taskText: pack.task.rawText,
+    filesIncluded: pack.relevantFiles.length,
+    knowledgeDocsIncluded: pack.projectKnowledge.length,
+  });
 
   return { pack, markdownPath, jsonPath, copiedToClipboard, candidateCount };
 }

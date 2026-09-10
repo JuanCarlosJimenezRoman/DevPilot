@@ -19,6 +19,7 @@ import {
 import { reconstructChangeContent } from './changeReconstruction.js';
 import { evaluatePermission, toolNameForOperation } from '../tools/permissionGuard.js';
 import type { RiskLevel, ToolName } from '../tools/permissionGuard.js';
+import { getActiveSessionId, logSessionEvent } from '../sessions/sessionEventLogger.js';
 
 const logger = createLogger('core:apply');
 
@@ -235,11 +236,17 @@ export async function applyChange(rootPath: string, entry: ApplyPlanEntry, appro
   try {
     const now = new Date().toISOString();
     const paramsJson = JSON.stringify({ path: entry.filePath, operation: entry.operation, format: entry.format });
+    // Session Memory real (07, Incremento 2) — antes de esta pieza siempre
+    // se insertaba NULL acá, porque no había ninguna sesión real a la cual
+    // apuntar (ver sessionRepo.ts). Una sola consulta por llamada a
+    // `applyChange`: barata, y el resultado no cambia entre los 4 puntos
+    // de este archivo que insertan una fila en `tool_invocations`.
+    const sessionId = getActiveSessionId(rootPath);
 
     if (!approved) {
       insertToolInvocation(projectDb, {
         id: randomUUID(),
-        sessionId: null,
+        sessionId,
         toolName: entry.toolName,
         riskLevel: entry.riskLevel,
         paramsJson,
@@ -258,7 +265,7 @@ export async function applyChange(rootPath: string, entry: ApplyPlanEntry, appro
       const resultSummary = `PathGuard rechazó la escritura: ${entry.absPath} cae fuera del proyecto.`;
       insertToolInvocation(projectDb, {
         id: randomUUID(),
-        sessionId: null,
+        sessionId,
         toolName: entry.toolName,
         riskLevel: entry.riskLevel,
         paramsJson,
@@ -296,7 +303,7 @@ export async function applyChange(rootPath: string, entry: ApplyPlanEntry, appro
       const failSummary = `Error al escribir: ${(err as Error).message}`;
       insertToolInvocation(projectDb, {
         id: randomUUID(),
-        sessionId: null,
+        sessionId,
         toolName: entry.toolName,
         riskLevel: entry.riskLevel,
         paramsJson,
@@ -310,7 +317,7 @@ export async function applyChange(rootPath: string, entry: ApplyPlanEntry, appro
 
     insertToolInvocation(projectDb, {
       id: randomUUID(),
-      sessionId: null,
+      sessionId,
       toolName: entry.toolName,
       riskLevel: entry.riskLevel,
       paramsJson,
@@ -400,4 +407,14 @@ export async function recordApplyBenchmark(
   } finally {
     projectDb.close();
   }
+
+  // Session Memory (07, Incremento 2): un evento por corrida de `apply`,
+  // best-effort — silencioso si no hay sesión activa (ver
+  // sessionEventLogger.ts). Fuera del bloque try/finally de arriba a
+  // propósito: la base del proyecto ya se cerró, y este evento se escribe
+  // en el `.jsonl` de la sesión, no en SQLite.
+  await logSessionEvent(rootPath, 'apply', {
+    contextPackId,
+    erroresEnEstaCorrida: runSummary.erroresEnEstaCorrida,
+  });
 }

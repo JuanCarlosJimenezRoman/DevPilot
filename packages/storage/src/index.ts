@@ -17,8 +17,15 @@ export * from './repos/contextPackRepo.js';
 export * from './repos/fileChangeProposalRepo.js';
 export * from './repos/toolInvocationRepo.js';
 export * from './repos/taskBenchmarkRepo.js';
+export * from './repos/decisionRepo.js';
+export * from './repos/contextPackDecisionRepo.js';
+export * from './repos/sessionRepo.js';
+export * from './repos/knowledgeRepo.js';
 export * from './files/snapshotStore.js';
 export * from './files/contextPackStore.js';
 export * from './files/changeProposalStore.js';
+export * from './files/decisionStore.js';
+export * from './files/sessionEventStore.js';
+export * from './files/knowledgeStore.js';
 
 export const STORAGE_PACKAGE_VERSION = '0.0.1';

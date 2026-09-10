@@ -2,14 +2,19 @@ import type { DatabaseSync } from 'node:sqlite';
 
 // Repositorio sobre `<proyecto>/.devpilot/devpilot.db` (tabla
 // `context_packs`, ver 03) — fila de auditoría que apunta al Markdown/JSON
-// reales en `.devpilot/context/`. `session_id` queda NULL en el Incremento
-// 1: Session Memory real (tabla `sessions` poblada de verdad) es del
-// Incremento 2 — ver docs/architecture/07-roadmap.md. El `sessionId` que sí
-// lleva el objeto `ContextPack` en memoria (tipo de dominio) es solo un
-// identificador de esta invocación, no persistido como sesión todavía.
+// reales en `.devpilot/context/`. Desde el Incremento 2 (Session Memory,
+// ver 07/sessionService.ts), `session_id` se completa con la sesión
+// activa real cuando hay una (`devpilot session start` corrido antes) — si
+// no hay ninguna, sigue en NULL, exactamente como en todo el Incremento 1.
+// El `sessionId` que lleva el objeto `ContextPack` en memoria (tipo de
+// dominio) es ese mismo id cuando hay sesión activa; si no la hay, sigue
+// siendo un id de un solo uso que no se persiste en `sessions` (ver
+// contextPackBuilder.ts) — Session Memory es opcional, no obligatoria para
+// generar un Context Pack.
 
 export interface ContextPackRow {
   id: string;
+  sessionId: string | null;
   taskText: string;
   createdAt: string;
   tokenEstimate: number;
@@ -29,9 +34,10 @@ export function insertContextPack(db: DatabaseSync, row: ContextPackRow): void {
   db.prepare(
     `INSERT INTO context_packs
        (id, session_id, task_text, created_at, token_estimate, classification, markdown_path, json_path)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     row.id,
+    row.sessionId,
     row.taskText,
     row.createdAt,
     row.tokenEstimate,
@@ -43,6 +49,7 @@ export function insertContextPack(db: DatabaseSync, row: ContextPackRow): void {
 
 interface ContextPackDbRow {
   id: string;
+  session_id: string | null;
   task_text: string;
   created_at: string;
   token_estimate: number;
@@ -54,6 +61,7 @@ interface ContextPackDbRow {
 function rowToContextPack(row: ContextPackDbRow): ContextPackRow {
   return {
     id: row.id,
+    sessionId: row.session_id,
     taskText: row.task_text,
     createdAt: row.created_at,
     tokenEstimate: row.token_estimate,
