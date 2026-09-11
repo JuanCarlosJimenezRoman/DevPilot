@@ -11,6 +11,8 @@
   "dependencies": {
     "@devpilot/shared": "workspace:*",
     "@devpilot/storage": "workspace:*",
+    "@types/cross-spawn": "^6.0.6",
+    "cross-spawn": "^7.0.6",
     "diff": "^9.0.0",
     "ignore": "^6.0.2",
     "typescript": "^5.7.2"

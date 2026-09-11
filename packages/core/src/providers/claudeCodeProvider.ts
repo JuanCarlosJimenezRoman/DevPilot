@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { createLogger } from '@devpilot/shared';
+import spawn from 'cross-spawn';
 
 // ClaudeCodeProvider — Incremento 4 ("Claude Code", ver 07). Primer y único
 // consumidor real de `packages/core/src/providers/` (README.md decía desde
@@ -25,8 +24,6 @@ import { createLogger } from '@devpilot/shared';
 // events (ej. un modo interactivo), se amplía entonces.
 
 const logger = createLogger('core:claude-code-provider');
-
-const execFileAsync = promisify(execFile);
 
 export interface ProviderCapabilities {
   streaming: boolean;
@@ -100,33 +97,119 @@ const DEFAULT_ANALYSIS_TIMEOUT_MS = 10 * 60 * 1_000; // un análisis profundo re
 const MAX_OUTPUT_BYTES = 20 * 1024 * 1024; // mismo límite que GitAdapter (gitAdapter.ts) para no cortar salidas grandes
 
 /**
- * El CLI real de Claude Code, en modo `-p --output-format json`, envuelve
- * la respuesta final en un objeto con (al menos) un campo `result` de tipo
- * string (ver docs/architecture/06-providers-and-browser-bridge.md, nota
- * de robustez). Se acepta cualquier objeto JSON que tenga ese campo como
- * string — nunca se asume el resto de la forma exacta, para no romper si
- * una versión futura agrega/renombra otros campos (cost, session_id,
- * etc.) que a DevPilot no le importan.
+ * Documentación original (06): el CLI de Claude Code, en modo `-p
+ * --output-format json`, envuelve la respuesta final en un objeto con (al
+ * menos) un campo `result` de tipo string. Si el stdout es JSON válido y
+ * trae ese campo, se usa tal cual — nunca se asume el resto de la forma
+ * exacta, para no romper si una versión futura agrega/renombra otros
+ * campos (cost, session_id, etc.) que a DevPilot no le importan.
+ *
+ * Hallazgo real (sesión 9, ver 07-roadmap.md — primera corrida contra un
+ * binario `claude` real y sin restricciones, v2.1.269 en Windows):
+ * `--permission-mode plan` combinado con `--output-format json` NO
+ * envuelve la respuesta en ese sobre — el modo plan imprime el texto
+ * final directo a stdout, texto plano, sin importar `--output-format`. La
+ * nota de robustez original ya anticipaba que el formato de salida podía
+ * cambiar entre versiones; confirmado esto con una corrida real, la
+ * respuesta correcta no es tratarlo como error — es usar el stdout crudo
+ * tal cual como texto final. El resto del pipeline
+ * (`deepAnalysisParser.ts`) ya es tolerante y extrae los bloques
+ * `<DEVPILOT_KNOWLEDGE>`/`<DEVPILOT_DECISION>` de texto plano sin
+ * depender de ningún sobre JSON — validado con una propuesta real
+ * completa devuelta por este mismo binario.
+ *
+ * Solo se reporta error (`unparsable-output`) cuando no hay absolutamente
+ * nada que parsear (stdout vacío) — ahí sí no hay texto útil que pasarle
+ * al parser tolerante.
  */
 function extractResultText(stdout: string): { text: string } | { error: string } {
-  let parsed: unknown;
+  const trimmed = stdout.trim();
+  if (trimmed.length === 0) {
+    return { error: 'La salida de `claude` está vacía.' };
+  }
   try {
-    parsed = JSON.parse(stdout);
-  } catch (err) {
-    return { error: `La salida de \`claude\` no es JSON válido: ${(err as Error).message}` };
+    const parsed: unknown = JSON.parse(trimmed);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'result' in parsed &&
+      typeof (parsed as { result: unknown }).result === 'string'
+    ) {
+      return { text: (parsed as { result: string }).result };
+    }
+    // JSON válido pero sin el campo `result` esperado — no se descarta,
+    // cae al mismo fallback que la salida no-JSON: se usa el texto crudo.
+  } catch {
+    // no era JSON — cae al fallback de abajo.
   }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('result' in parsed) ||
-    typeof (parsed as { result: unknown }).result !== 'string'
-  ) {
-    return {
-      error:
-        'La salida de `claude --output-format json` no tiene el campo `result` (string) esperado — es posible que la versión instalada de Claude Code haya cambiado el formato de salida (ver nota de robustez en 06).',
-    };
-  }
-  return { text: (parsed as { result: string }).result };
+  return { text: trimmed };
+}
+
+interface ClaudeInvocationResult {
+  /** Código de salida del proceso, o `null` si nunca llegó a terminar normalmente (timeout/señal). */
+  status: number | null;
+  /** Señal que terminó el proceso (ej. `SIGTERM` por timeout), o `null`. */
+  signal: NodeJS.Signals | null;
+  /** Error a nivel de spawn: binario no encontrado (ENOENT), timeout (ETIMEDOUT), etc. `undefined` si el proceso arrancó y terminó, sin importar el código de salida. */
+  error?: NodeJS.ErrnoException;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Invoca el binario `claude` usando `cross-spawn` en vez de
+ * `node:child_process` directo.
+ *
+ * Hallazgo real (sesión 9, ver 07-roadmap.md — primera validación en
+ * Windows real fuera de un sandbox restringido): `execFile('claude', ...)`
+ * sin `shell: true` no puede arrancar el binario en Windows. `npm install
+ * -g` ahí no deja un `.exe` suelto en el PATH — deja wrappers
+ * `claude.cmd`/`claude.ps1` que a su vez invocan el binario real dentro de
+ * `node_modules`, y `execFile`/`spawn` de Node sin shell no sabe ejecutar
+ * archivos `.cmd` directamente (hace falta pasar por `cmd.exe`). El
+ * síntoma es un `ENOENT` idéntico al de "no está instalado", aunque
+ * `claude --version` funcione perfecto a mano en la misma terminal.
+ * `cross-spawn` resuelve esto — y de paso cita cada argumento
+ * correctamente para `cmd.exe`, algo que hacer a mano con `shell: true` es
+ * fácil de hacer mal si el prompt trae comillas, espacios o caracteres
+ * especiales del shell (`&`, `|`, `%`, `^`) — y en Mac/Linux se comporta
+ * igual que `child_process.spawn` normal, sin cambiar nada ahí.
+ *
+ * Se usa la variante síncrona (`spawn.sync`) a propósito: DevPilot es un
+ * CLI de un solo comando por invocación, no un servidor — no hay nada más
+ * corriendo en el event loop mientras se espera a Claude Code, así que
+ * bloquear acá es correcto y evita reimplementar a mano el buffering de
+ * stdout/stderr y el manejo de timeout que antes daba gratis
+ * `execFileAsync` (la variante async de `cross-spawn` no ofrece esa
+ * superficie por sí sola; solo la sync matchea la de
+ * `child_process.spawnSync`, con `timeout`/`maxBuffer`/`encoding`
+ * incluidos).
+ */
+function invokeClaude(
+  args: string[],
+  opts: { cwd?: string; timeoutMs: number; maxBuffer: number },
+): ClaudeInvocationResult {
+  const result = spawn.sync('claude', args, {
+    cwd: opts.cwd,
+    timeout: opts.timeoutMs,
+    maxBuffer: opts.maxBuffer,
+    encoding: 'utf8',
+  });
+  return {
+    status: result.status,
+    signal: result.signal,
+    error: result.error as NodeJS.ErrnoException | undefined,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+function isEnoent(error: NodeJS.ErrnoException | undefined): boolean {
+  return error?.code === 'ENOENT';
+}
+
+function isTimeout(result: ClaudeInvocationResult): boolean {
+  return result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM';
 }
 
 /** Fábrica del provider — sin estado, cada llamada arma sus propios argumentos de subprocess. */
@@ -147,89 +230,89 @@ export function createClaudeCodeProvider(): ClaudeCodeProvider {
     },
 
     async isAvailable(): Promise<ClaudeCodeAvailability> {
-      try {
-        const { stdout, stderr } = await execFileAsync('claude', ['--version'], {
-          timeout: DEFAULT_AVAILABILITY_TIMEOUT_MS,
-          encoding: 'utf8',
-        });
-        return { available: true, detail: (stdout || stderr || '').trim() };
-      } catch (err) {
-        const nodeErr = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-        if (nodeErr.code === 'ENOENT') {
-          return {
-            available: false,
-            reason: 'El binario `claude` no está instalado (o no está en el PATH de este shell).',
-          };
-        }
-        // El proceso SÍ arrancó (no fue ENOENT) pero devolvió error o exit
-        // code != 0 — ej. el hallazgo real documentado en 07-roadmap.md: un
-        // entorno donde `claude --version` está deliberadamente
-        // restringido devuelve un mensaje de error propio en vez de una
-        // versión, sin que eso signifique que el binario no exista o que
-        // `claude -p` (lo que realmente usa `runDeepAnalysis`) vaya a
-        // fallar igual. Se reporta disponible, con el detalle crudo para
-        // diagnóstico.
-        const detail = [nodeErr.stdout, nodeErr.stderr, nodeErr.message].filter(Boolean).join(' | ').trim();
-        return { available: true, detail: detail || undefined };
+      const result = invokeClaude(['--version'], {
+        timeoutMs: DEFAULT_AVAILABILITY_TIMEOUT_MS,
+        maxBuffer: MAX_OUTPUT_BYTES,
+      });
+
+      if (isEnoent(result.error)) {
+        return {
+          available: false,
+          reason: 'El binario `claude` no está instalado (o no está en el PATH de este shell).',
+        };
       }
+      if (!result.error && result.status === 0) {
+        return { available: true, detail: (result.stdout || result.stderr || '').trim() };
+      }
+      // El proceso SÍ arrancó (no fue ENOENT) pero devolvió error, exit
+      // code != 0, o timeout — ej. el hallazgo real documentado en
+      // 07-roadmap.md: un entorno donde `claude --version` está
+      // deliberadamente restringido devuelve un mensaje de error propio en
+      // vez de una versión, sin que eso signifique que el binario no
+      // exista o que `claude -p` (lo que realmente usa
+      // `runDeepAnalysis`) vaya a fallar igual. Se reporta disponible, con
+      // el detalle crudo para diagnóstico.
+      const detail = [result.stdout, result.stderr, result.error?.message].filter(Boolean).join(' | ').trim();
+      return { available: true, detail: detail || undefined };
     },
 
     async runDeepAnalysis(prompt: string, opts: { cwd: string; timeoutMs?: number }): Promise<RunAnalysisOutcome> {
-      try {
-        const { stdout } = await execFileAsync(
-          'claude',
-          ['-p', prompt, '--output-format', 'json', '--permission-mode', 'plan'],
-          {
-            cwd: opts.cwd,
-            timeout: opts.timeoutMs ?? DEFAULT_ANALYSIS_TIMEOUT_MS,
-            maxBuffer: MAX_OUTPUT_BYTES,
-            encoding: 'utf8',
-          },
-        );
-        const extracted = extractResultText(stdout);
-        if ('error' in extracted) {
-          logger.debug('salida de claude no reconocida:', stdout.slice(0, 500));
-          return { ok: false, kind: 'unparsable-output', message: extracted.error, raw: stdout };
-        }
-        return { ok: true, text: extracted.text };
-      } catch (err) {
-        const nodeErr = err as NodeJS.ErrnoException & {
-          killed?: boolean;
-          signal?: string;
-          stdout?: string;
-          stderr?: string;
-          code?: number | string;
+      const timeoutMs = opts.timeoutMs ?? DEFAULT_ANALYSIS_TIMEOUT_MS;
+      const result = invokeClaude(['-p', prompt, '--output-format', 'json', '--permission-mode', 'plan'], {
+        cwd: opts.cwd,
+        timeoutMs,
+        maxBuffer: MAX_OUTPUT_BYTES,
+      });
+
+      if (isEnoent(result.error)) {
+        return {
+          ok: false,
+          kind: 'not-available',
+          message: 'El binario `claude` no está instalado (o no está en el PATH de este shell).',
         };
-
-        if (nodeErr.code === 'ENOENT') {
-          return {
-            ok: false,
-            kind: 'not-available',
-            message: 'El binario `claude` no está instalado (o no está en el PATH de este shell).',
-          };
-        }
-        if (nodeErr.killed || nodeErr.signal === 'SIGTERM') {
-          return {
-            ok: false,
-            kind: 'timeout',
-            message: `Claude Code no terminó dentro del tiempo límite (${((opts.timeoutMs ?? DEFAULT_ANALYSIS_TIMEOUT_MS) / 1000).toFixed(0)}s).`,
-          };
-        }
-
+      }
+      if (isTimeout(result)) {
+        return {
+          ok: false,
+          kind: 'timeout',
+          message: `Claude Code no terminó dentro del tiempo límite (${(timeoutMs / 1000).toFixed(0)}s).`,
+        };
+      }
+      if (result.error) {
+        // Error de spawn no cubierto arriba (ej. EACCES, o el proceso
+        // superó `maxBuffer`) — se muestra crudo, nunca se intenta
+        // adivinar qué pasó (misma filosofía que el resto de esta
+        // función).
+        const raw = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+        return {
+          ok: false,
+          kind: 'rejected',
+          message: `\`claude\` no pudo ejecutarse: ${result.error.message}`,
+          raw: raw || undefined,
+        };
+      }
+      if (result.status !== 0) {
         // Exit code != 0 con el binario sí instalado: se muestra el
         // stderr/stdout crudo tal cual, nunca se intenta adivinar qué
         // pasó — ej. flags no soportados por esa versión de Claude Code,
         // sesión no iniciada, permission-mode desconocido. Ver nota de
         // robustez de 06: "fallar de forma explícita y legible... en vez
         // de asumir compatibilidad ciega".
-        const raw = [nodeErr.stdout, nodeErr.stderr].filter(Boolean).join('\n').trim();
+        const raw = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
         return {
           ok: false,
           kind: 'rejected',
-          message: `\`claude\` devolvió un error (código ${String(nodeErr.code ?? '?')}): ${raw || nodeErr.message}`,
+          message: `\`claude\` devolvió un error (código ${String(result.status ?? '?')}): ${raw || 'sin salida'}`,
           raw: raw || undefined,
         };
       }
+
+      const extracted = extractResultText(result.stdout);
+      if ('error' in extracted) {
+        logger.debug('salida de claude no reconocida:', result.stdout.slice(0, 500));
+        return { ok: false, kind: 'unparsable-output', message: extracted.error, raw: result.stdout };
+      }
+      return { ok: true, text: extracted.text };
     },
   };
 }
