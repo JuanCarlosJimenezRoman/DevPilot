@@ -14,6 +14,8 @@ export * from './tools/index.js';
 export * from './decisions/index.js';
 export * from './sessions/index.js';
 export * from './knowledge/index.js';
+export * from './providers/index.js';
+export * from './analysis/index.js';
 
 const logger = createLogger('core');
 

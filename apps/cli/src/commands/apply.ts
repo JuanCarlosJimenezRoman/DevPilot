@@ -1,6 +1,6 @@
-import { createInterface } from 'node:readline/promises';
 import type { Command } from 'commander';
 import { applyChange, buildApplyPlan, recordApplyBenchmark } from '@devpilot/core';
+import { createConfirmer } from './shared/confirmer.js';
 
 const STATUS_LABEL: Record<string, string> = {
   valid: '✅ valid',
@@ -26,89 +26,6 @@ function colorizeDiff(diffText: string): string {
       return line;
     })
     .join('\n');
-}
-
-function isAffirmative(answer: string): boolean {
-  return /^y(es)?$/i.test(answer.trim());
-}
-
-/**
- * Confirmador de aprobaciones — abstrae la diferencia entre una terminal
- * interactiva real y stdin no interactivo (pipe, redirección desde
- * archivo, `yes |`, o los tests de este mismo comando).
- *
- * Se probó primero con `readline.createInterface` re-creada en cada
- * pregunta: eso perdía las respuestas siguientes porque `rl.close()`
- * descarta el buffer interno de líneas. Se corrigió reutilizando UNA sola
- * interfaz — pero con stdin no interactivo eso también falla: Node lee
- * todo el pipe de una vez y emite el evento `end` sobre la interfaz de
- * readline apenas se agota el input, y como nuestro código hace trabajo
- * async entre pregunta y pregunta (reconstruir contenido, escribir a
- * disco), la interfaz ya está cerrada para cuando llega la segunda
- * pregunta → `rl.question()` lanza "readline was closed" aunque el pipe
- * traía de sobra las respuestas necesarias. Es una condición de carrera
- * real de Node con streams no-TTY, no un bug de nuestra lógica.
- *
- * La solución correcta es tratar los dos casos por separado:
- *   - TTY real: preguntar una por una con readline, como espera un humano.
- *   - No-TTY: leer TODO stdin de una sola vez (ya está disponible completo
- *     en el pipe) y consumir una línea por confirmación, sin más llamadas
- *     a readline. Si el input se agota antes de que se necesiten más
- *     respuestas, se trata como "no" y se avisa explícitamente en vez de
- *     quedarse colgado.
- */
-interface Confirmer {
-  confirm(promptText: string): Promise<boolean>;
-  close(): void;
-}
-
-function createConfirmer(): Confirmer {
-  if (process.stdin.isTTY) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    return {
-      async confirm(promptText: string): Promise<boolean> {
-        const answer = await rl.question(`${promptText} [y/N] `);
-        return isAffirmative(answer);
-      },
-      close(): void {
-        rl.close();
-      },
-    };
-  }
-
-  let pendingLines: string[] | null = null;
-  const readAllStdinLines = async (): Promise<string[]> => {
-    if (pendingLines) return pendingLines;
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    await new Promise<void>((resolve, reject) => {
-      process.stdin.on('data', (chunk) => {
-        data += chunk;
-      });
-      process.stdin.on('end', () => resolve());
-      process.stdin.on('error', reject);
-    });
-    pendingLines = data.split('\n');
-    return pendingLines;
-  };
-
-  return {
-    async confirm(promptText: string): Promise<boolean> {
-      const lines = await readAllStdinLines();
-      const next = lines.shift();
-      if (next === undefined) {
-        console.log(`${promptText} [y/N] (sin más respuestas en stdin — se trata como "no")`);
-        return false;
-      }
-      console.log(`${promptText} [y/N] ${next.trim()}`);
-      return isAffirmative(next);
-    },
-    close(): void {
-      // No hay nada que cerrar: no se creó ninguna interfaz de readline en
-      // este modo, y destruir process.stdin aquí no es necesario ni
-      // deseable (Node lo limpia solo al terminar el proceso).
-    },
-  };
 }
 
 export function registerApplyCommand(program: Command): void {

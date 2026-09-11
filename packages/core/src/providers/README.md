@@ -1,3 +1,5 @@
 AIProvider, ManualProvider, ClaudeCodeProvider — ver `docs/architecture/06-providers-and-browser-bridge.md`.
 
-`ManualProvider` (el flujo de copiar/pegar en un chat web) se implementa en el **Incremento 1**. `ClaudeCodeProvider` llega en el **Incremento 4** ("Claude Code", ver `docs/architecture/07-roadmap.md`) — DevPilot debe funcionar completo sin él.
+`ManualProvider` (el flujo de copiar/pegar en un chat web) nunca se implementó como una clase separada — el Incremento 1 resolvió ese flujo directamente en `context/clipboard.ts` + `devpilot import` (ver `context/README.md`), sin necesitar la abstracción `AIProvider` completa porque no había un segundo provider real todavía con quien compartir esa interfaz.
+
+`ClaudeCodeProvider` (`claudeCodeProvider.ts`) llegó en el **Incremento 4** ("Claude Code", ver `docs/architecture/07-roadmap.md`) — primer y único consumidor real de esta carpeta. Implementa un subconjunto deliberadamente angosto de la interfaz `AIProvider` de 06 (`isAvailable()` + una sola llamada no interactiva `runDeepAnalysis()`, no el `execute()` genérico con streaming/tool-events) porque el único consumidor real (`devpilot analyze --deep`, ver `analysis/deepAnalysisService.ts`) no necesita más que eso — ver el comentario de cabecera de `claudeCodeProvider.ts` para el detalle completo de por qué.

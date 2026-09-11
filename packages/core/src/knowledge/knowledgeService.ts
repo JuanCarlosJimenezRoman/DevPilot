@@ -35,10 +35,13 @@ import { logSessionEvent } from '../sessions/sessionEventLogger.js';
 // pero de la forma más simple posible: nunca toca un doc 'manual' (ver
 // abajo), en vez de pedir aprobación para cada regeneración.
 
-const CANONICAL_TYPES = ['architecture', 'modules', 'database', 'business-rules', 'conventions'] as const;
-type CanonicalKnowledgeType = (typeof CANONICAL_TYPES)[number];
+// Exportados desde el Incremento 4: `deepAnalysisService.ts` necesita los
+// mismos títulos por defecto para presentar el plan de aprobación de
+// knowledge docs `deep-analysis` — mismo criterio que `slugify` arriba.
+export const CANONICAL_TYPES = ['architecture', 'modules', 'database', 'business-rules', 'conventions'] as const;
+export type CanonicalKnowledgeType = (typeof CANONICAL_TYPES)[number];
 
-const CANONICAL_TITLES: Record<CanonicalKnowledgeType, string> = {
+export const CANONICAL_TITLES: Record<CanonicalKnowledgeType, string> = {
   architecture: 'Arquitectura',
   modules: 'Módulos',
   database: 'Base de datos',
@@ -84,7 +87,11 @@ async function readFileOrLiteralText(input: string): Promise<string> {
 // siempre con la misma codificación exacta.
 const COMBINING_DIACRITICS_RE = /[\u0300-\u036f]/g;
 
-function slugify(text: string): string {
+// Exportada (no solo interna) desde el Incremento 4: `deepAnalysisService.ts`
+// necesita la misma slugificación para resolver el `id` de un knowledge doc
+// "custom" propuesto por Claude Code — mismo criterio de identidad que
+// `setManualKnowledge` de acá abajo, no tiene sentido duplicar la lógica.
+export function slugify(text: string): string {
   const slug = text
     .toLowerCase()
     .normalize('NFD')

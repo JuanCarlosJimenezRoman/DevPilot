@@ -11,6 +11,7 @@ import { registerDecideCommand } from './commands/decide.js';
 import { registerSessionCommand } from './commands/session.js';
 import { registerKnowledgeCommand } from './commands/knowledge.js';
 import { registerGitCommand } from './commands/git.js';
+import { registerAnalyzeCommand } from './commands/analyze.js';
 
 const program = new Command();
 
@@ -42,5 +43,6 @@ registerDecideCommand(program);
 registerSessionCommand(program);
 registerKnowledgeCommand(program);
 registerGitCommand(program);
+registerAnalyzeCommand(program);
 
 program.parse(process.argv);
