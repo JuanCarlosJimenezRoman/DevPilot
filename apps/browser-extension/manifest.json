@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "DevPilot Bridge",
+  "version": "0.1.0",
+  "description": "Automatiza el copiar/pegar del Context Pack de DevPilot y de la respuesta de la IA en Claude.ai, ChatGPT y DeepSeek Chat. Conveniencia de UX pura: nunca reemplaza `devpilot import`.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "DevPilot Bridge",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": ["clipboardRead", "clipboardWrite"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "run_at": "document_idle",
+      "js": [
+        "dist/core/dom-utils.js",
+        "dist/core/registry.js",
+        "dist/adapters/claudeWeb.js",
+        "dist/adapters/chatgptWeb.js",
+        "dist/adapters/deepseekWeb.js",
+        "dist/ui/widget.js",
+        "dist/content/main.js"
+      ]
+    }
+  ]
+}

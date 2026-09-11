@@ -13,7 +13,8 @@
     "clean": "tsc -b --clean",
     "devpilot": "tsx apps/cli/src/index.ts",
     "dev:cli": "tsx watch apps/cli/src/index.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:extension": "pnpm --filter @devpilot/browser-extension build"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",

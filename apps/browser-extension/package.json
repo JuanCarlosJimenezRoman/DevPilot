@@ -1,0 +1,10 @@
+{
+  "name": "@devpilot/browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extensión de navegador (Manifest V3) que automatiza el copiar/pegar físico del Context Pack y de la respuesta de la IA en Claude.ai, ChatGPT y DeepSeek Chat. Conveniencia de UX pura sobre el mismo contrato de ClipboardGenericAdapter (ver docs/architecture/06) — nunca reemplaza `devpilot import`, nunca parsea nada.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  }
+}
