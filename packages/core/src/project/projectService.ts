@@ -15,6 +15,7 @@ import {
   writeSnapshotFile,
 } from '@devpilot/storage';
 import { detectVcs, scanProject } from './scanner.js';
+import { reindexProject, type ReindexResult } from './indexer.js';
 
 const logger = createLogger('core:project');
 
@@ -22,6 +23,7 @@ export interface AddProjectResult {
   project: Project;
   snapshot: ProjectSnapshot;
   state: ProjectState;
+  reindex: ReindexResult;
 }
 
 /**
@@ -68,9 +70,24 @@ export async function addProject(rawPath: string): Promise<AddProjectResult> {
   const projectDb = openProjectDb(rootPath);
   let state: ProjectState;
   let snapshot: ProjectSnapshot;
+  let reindex: ReindexResult;
   try {
     const previousState = getProjectState(projectDb, project.id);
     const version = (previousState?.snapshotVersion ?? 0) + 1;
+
+    // Indexer (04, "Reindexado incremental" — ver indexer.ts): mantiene la
+    // tabla `files` sin recorrer y rehashear todo el árbol si el commit no
+    // cambió desde el último `project add`. Corre después del Scanner
+    // (que ya hizo su propio recorrido liviano, solo conteo/lenguaje, para
+    // el Project Snapshot) y antes de persistir el nuevo `project_state`,
+    // porque necesita el `lastIndexedCommit` anterior para decidir si
+    // puede saltarse o ir incremental.
+    reindex = reindexProject(
+      projectDb,
+      rootPath,
+      project.vcs,
+      previousState?.lastIndexedCommit ?? null,
+    );
 
     snapshot = {
       projectId: project.id,
@@ -91,7 +108,14 @@ export async function addProject(rawPath: string): Promise<AddProjectResult> {
 
     state = {
       projectId: project.id,
-      lastIndexedCommit: previousState?.lastIndexedCommit ?? null,
+      // Antes de esta pieza, este campo nunca se escribía con un valor
+      // real: solo se copiaba el `previousState?.lastIndexedCommit` de sí
+      // mismo, así que se quedaba en `null` para siempre (mismo patrón de
+      // "columna existe desde el Incremento 0, sin consumidor real" que
+      // otras piezas de este incremento). Ahora `reindex.currentCommit` es
+      // el commit real usado por el Indexer para este reindexado — `null`
+      // solo si el proyecto no es git, o es git sin commits todavía.
+      lastIndexedCommit: reindex.currentCommit,
       lastDeepAnalysisCommit: previousState?.lastDeepAnalysisCommit ?? null,
       lastScanAt: now,
       snapshotVersion: version,
@@ -102,7 +126,7 @@ export async function addProject(rawPath: string): Promise<AddProjectResult> {
     projectDb.close();
   }
 
-  return { project, snapshot, state };
+  return { project, snapshot, state, reindex };
 }
 
 /** `devpilot project list` — lee solo el catálogo global, no toca las bases locales de cada proyecto. */

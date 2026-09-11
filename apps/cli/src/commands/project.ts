@@ -1,9 +1,25 @@
 import type { Command } from 'commander';
-import { addProject, listProjects } from '@devpilot/core';
+import { addProject, listProjects, type ReindexResult } from '@devpilot/core';
 
 function formatValue(value: unknown): string {
   if (value === undefined || value === null || value === '') return '(no detectado)';
   return String(value);
+}
+
+// Refresco incremental de Project State (07): resume en una línea qué
+// hizo el Indexer, para que el ahorro de trabajo (o su ausencia, en
+// proyectos sin git) sea visible y no un detalle interno invisible.
+function formatReindexSummary(reindex: ReindexResult): string {
+  switch (reindex.mode) {
+    case 'skipped':
+      return `sin cambios desde el último escaneo (commit ${formatValue(reindex.currentCommit)} igual al indexado) — se saltó el reindexado, ${reindex.totalIndexed} archivo(s) en el índice`;
+    case 'incremental':
+      return `reindexado incremental vía \`git diff\` — ${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} actualizado(s), ${reindex.filesRemoved} eliminado(s) (${reindex.totalIndexed} en total)`;
+    case 'full':
+      return `reindexado completo — ${reindex.totalIndexed} archivo(s) indexado(s) (${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} ya existían)`;
+    default:
+      return reindex.mode;
+  }
 }
 
 export function registerProjectCommand(program: Command): void {
@@ -14,7 +30,7 @@ export function registerProjectCommand(program: Command): void {
     .description('Escanea una carpeta y la registra (o actualiza) como proyecto de DevPilot.')
     .action(async (ruta: string) => {
       try {
-        const { project: p, snapshot, state } = await addProject(ruta);
+        const { project: p, snapshot, state, reindex } = await addProject(ruta);
         console.log(`Proyecto: ${p.name} (${p.id})`);
         console.log(`  Ruta:             ${p.rootPath}`);
         console.log(`  VCS:              ${p.vcs}`);
@@ -28,6 +44,7 @@ export function registerProjectCommand(program: Command): void {
         console.log(`  Commit actual:    ${formatValue(snapshot.gitCommit)}`);
         console.log(`  Snapshot versión: ${state.snapshotVersion}`);
         console.log(`  Snapshot guardado en: ${state.snapshotPath}`);
+        console.log(`  Índice de archivos: ${formatReindexSummary(reindex)}`);
       } catch (err) {
         console.error(`Error al registrar el proyecto: ${(err as Error).message}`);
         process.exitCode = 1;

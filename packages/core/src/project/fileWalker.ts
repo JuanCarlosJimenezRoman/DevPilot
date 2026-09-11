@@ -66,6 +66,27 @@ function buildIgnore(rootPath: string): IgnoreInstance {
 }
 
 /**
+ * Expuesto para el Indexer (indexer.ts): el reindexado incremental no
+ * recorre el árbol (por eso es incremental), pero cada ruta que
+ * `git diff --name-status` reporta como cambiada igual debe pasar por las
+ * mismas reglas de ignorados que un recorrido completo -- si no, una ruta
+ * ignorada (ej. `.devpilot/` sin `.gitignore` que la excluya, o cualquier
+ * cosa bajo `node_modules/` si alguna vez terminó comiteada por error)
+ * que git sí ve como "cambiada" entraría al índice igual, dando un
+ * resultado distinto entre reindexado completo e incremental para el
+ * mismo estado del repo -- encontrado probando este mismo archivo (ver
+ * 07-roadmap.md).
+ */
+export function createIgnoreMatcher(rootPath: string): (relPath: string, isDirectory?: boolean) => boolean {
+  const ig = buildIgnore(rootPath);
+  return (relPath: string, isDirectory = false) => {
+    const posixRelPath = relPath.split(path.sep).join('/');
+    const checkPath = isDirectory ? `${posixRelPath}/` : posixRelPath;
+    return ig.ignores(checkPath);
+  };
+}
+
+/**
  * Recorrido síncrono compartido: invoca `onFile` para cada archivo no
  * ignorado. Los proyectos objetivo de v1 son de tamaño normal, no
  * monorepos gigantes (ver 04) — recorrido síncrono recursivo es

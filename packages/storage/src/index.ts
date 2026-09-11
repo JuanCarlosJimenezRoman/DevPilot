@@ -21,6 +21,7 @@ export * from './repos/decisionRepo.js';
 export * from './repos/contextPackDecisionRepo.js';
 export * from './repos/sessionRepo.js';
 export * from './repos/knowledgeRepo.js';
+export * from './repos/fileIndexRepo.js';
 export * from './files/snapshotStore.js';
 export * from './files/contextPackStore.js';
 export * from './files/changeProposalStore.js';
