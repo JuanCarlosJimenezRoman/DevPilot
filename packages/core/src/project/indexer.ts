@@ -6,13 +6,16 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createLogger } from '@devpilot/shared';
 import {
   countFileIndexRows,
+  countSymbolRows,
   deleteFileIndexRowByPath,
   listFileIndexPaths,
+  replaceSymbolsForFile,
   upsertFileIndexRow,
   type FileIndexRow,
 } from '@devpilot/storage';
 import { detectLanguage } from './languageExtensions.js';
 import { createIgnoreMatcher, listProjectFiles } from './fileWalker.js';
+import { extractSymbols } from './symbolExtractor.js';
 
 const logger = createLogger('core:indexer');
 
@@ -36,6 +39,57 @@ export interface ReindexResult {
   filesRemoved: number;
   /** Total de filas en `files` después de esta operación -- útil para reportar "296 archivos indexados" incluso en modo `skipped`. */
   totalIndexed: number;
+  /** Total de filas en `symbols` después de esta operación (Incremento 3, ver symbolExtractor.ts) -- 0 si el proyecto no tiene archivos TypeScript/JavaScript. */
+  totalSymbolsIndexed: number;
+}
+
+// Símbolos (Incremento 3, 04 "Indexer" + 07): mismo límite que
+// `MAX_READABLE_BYTES` en fileReading.ts -- por encima de este tamaño, ni
+// se intenta parsear con el compilador de TypeScript (un archivo así de
+// grande es casi siempre generado/vendored, no código que el Context
+// Planner deba entender símbolo por símbolo).
+const MAX_SYMBOL_FILE_BYTES = 1.5 * 1024 * 1024;
+
+/**
+ * Extrae y persiste los símbolos de un archivo ya indexado (`fileId` es el
+ * id REAL devuelto por `upsertFileIndexRow`, ver el comentario en
+ * fileIndexRepo.ts). Nunca lanza: un archivo demasiado grande, ilegible, o
+ * con sintaxis inválida termina con símbolos vacíos (`[]`) en vez de
+ * romper el reindexado completo -- mismo criterio defensivo que el resto
+ * del Indexer.
+ */
+function extractAndPersistSymbols(
+  db: DatabaseSync,
+  fileId: string,
+  relPath: string,
+  absPath: string,
+  sizeBytes: number,
+): void {
+  if (sizeBytes > MAX_SYMBOL_FILE_BYTES) {
+    replaceSymbolsForFile(db, fileId, []);
+    return;
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(absPath, 'utf8');
+  } catch {
+    replaceSymbolsForFile(db, fileId, []);
+    return;
+  }
+
+  const symbols = extractSymbols(relPath, content);
+  replaceSymbolsForFile(
+    db,
+    fileId,
+    symbols.map((s) => ({
+      name: s.name,
+      kind: s.kind,
+      lineStart: s.lineStart,
+      lineEnd: s.lineEnd,
+      isExported: s.isExported,
+    })),
+  );
 }
 
 function hashFileContent(absPath: string): string {
@@ -54,17 +108,34 @@ function indexOneFile(
   currentCommit: string | null,
 ): void {
   const stat = statSync(absPath);
+  const language = detectLanguage(relPath);
   const row: FileIndexRow = {
     id: randomUUID(),
     path: relPath,
     hash: hashFileContent(absPath),
-    language: detectLanguage(relPath),
+    language,
     sizeBytes: stat.size,
     lastModified: stat.mtime.toISOString(),
     lastSeenCommit: currentCommit,
     indexedAt: new Date().toISOString(),
   };
-  upsertFileIndexRow(db, row);
+  // `upsertFileIndexRow` devuelve el id REAL de la fila (no necesariamente
+  // `row.id`, que se generó arriba antes de saber si iba a ser un INSERT o
+  // un UPDATE, ver el comentario en fileIndexRepo.ts) -- hace falta ese id
+  // real para asociar símbolos al archivo correcto.
+  const fileId = upsertFileIndexRow(db, row);
+
+  // Símbolos (Incremento 3, ver symbolExtractor.ts): mismo alcance que el
+  // resto del Indexer/Scanner (01) -- solo TypeScript/JavaScript. Para
+  // cualquier otro lenguaje se limpia explícitamente (en vez de no llamar
+  // a nada) para no dejar símbolos de una corrida anterior si el archivo
+  // cambió de lenguaje entre reindexados (ej. un renombrado sin `git mv`,
+  // que git ve como D+A).
+  if (language === 'typescript' || language === 'javascript') {
+    extractAndPersistSymbols(db, fileId, relPath, absPath, stat.size);
+  } else {
+    replaceSymbolsForFile(db, fileId, []);
+  }
 }
 
 function getCurrentGitCommit(rootPath: string): string | null {
@@ -160,6 +231,7 @@ function fullReindex(db: DatabaseSync, rootPath: string, currentCommit: string |
     filesUpdated,
     filesRemoved,
     totalIndexed: countFileIndexRows(db),
+    totalSymbolsIndexed: countSymbolRows(db),
   };
 }
 
@@ -210,6 +282,7 @@ function incrementalReindex(
     filesUpdated,
     filesRemoved,
     totalIndexed: countFileIndexRows(db),
+    totalSymbolsIndexed: countSymbolRows(db),
   };
 }
 
@@ -257,6 +330,7 @@ export function reindexProject(
         filesUpdated: 0,
         filesRemoved: 0,
         totalIndexed: countFileIndexRows(db),
+        totalSymbolsIndexed: countSymbolRows(db),
       };
     }
 

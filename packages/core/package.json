@@ -12,6 +12,7 @@
     "@devpilot/shared": "workspace:*",
     "@devpilot/storage": "workspace:*",
     "diff": "^9.0.0",
-    "ignore": "^6.0.2"
+    "ignore": "^6.0.2",
+    "typescript": "^5.7.2"
   }
 }

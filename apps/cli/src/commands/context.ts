@@ -48,6 +48,12 @@ export function registerContextCommand(program: Command): void {
           console.log(
             `  Tokens estimados: ${pack.tokenEstimate.totalTokens} (${pack.tokenEstimate.classification})`,
           );
+          if (pack.compaction) {
+            console.log(`  Context Compaction aplicada: ${pack.compaction.strategiesApplied.join(', ')}`);
+          }
+          if (pack.recentChanges && pack.recentChanges.files.length > 0) {
+            console.log(`  Cambios sin commitear incluidos: ${pack.recentChanges.files.length} archivo(s)`);
+          }
           console.log(`  Markdown: ${result.markdownPath}`);
           console.log(`  JSON:     ${result.jsonPath}`);
           console.log(

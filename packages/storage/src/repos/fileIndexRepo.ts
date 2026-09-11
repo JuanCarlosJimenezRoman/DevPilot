@@ -54,28 +54,39 @@ function rowToFileIndexRow(row: FileIndexDbRow): FileIndexRow {
  * conserva su `id` original (no se pisa en el UPDATE) en vez de generar
  * uno nuevo cada vez. Mismo patrón de upsert por identidad natural que
  * `upsertKnowledgeDoc`/`upsertProjectState`.
+ *
+ * Devuelve el `id` REAL de la fila resultante (vía `RETURNING`) -- no
+ * necesariamente `row.id`, que el caller genera con `randomUUID()` antes
+ * de saber si va a ser un INSERT o un UPDATE. Desde el Incremento 3, el
+ * Indexer necesita este id real para poder asociarle símbolos (ver
+ * symbolRepo.ts) al archivo correcto incluso cuando reindexa uno ya
+ * existente.
  */
-export function upsertFileIndexRow(db: DatabaseSync, row: FileIndexRow): void {
-  db.prepare(
-    `INSERT INTO files (id, path, hash, language, size_bytes, last_modified, last_seen_commit, indexed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(path) DO UPDATE SET
-       hash = excluded.hash,
-       language = excluded.language,
-       size_bytes = excluded.size_bytes,
-       last_modified = excluded.last_modified,
-       last_seen_commit = excluded.last_seen_commit,
-       indexed_at = excluded.indexed_at`,
-  ).run(
-    row.id,
-    row.path,
-    row.hash,
-    row.language,
-    row.sizeBytes,
-    row.lastModified,
-    row.lastSeenCommit,
-    row.indexedAt,
-  );
+export function upsertFileIndexRow(db: DatabaseSync, row: FileIndexRow): string {
+  const result = db
+    .prepare(
+      `INSERT INTO files (id, path, hash, language, size_bytes, last_modified, last_seen_commit, indexed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(path) DO UPDATE SET
+         hash = excluded.hash,
+         language = excluded.language,
+         size_bytes = excluded.size_bytes,
+         last_modified = excluded.last_modified,
+         last_seen_commit = excluded.last_seen_commit,
+         indexed_at = excluded.indexed_at
+       RETURNING id`,
+    )
+    .get(
+      row.id,
+      row.path,
+      row.hash,
+      row.language,
+      row.sizeBytes,
+      row.lastModified,
+      row.lastSeenCommit,
+      row.indexedAt,
+    ) as { id: string };
+  return result.id;
 }
 
 export function deleteFileIndexRowByPath(db: DatabaseSync, filePath: string): void {

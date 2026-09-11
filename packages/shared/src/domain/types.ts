@@ -128,11 +128,48 @@ export interface TokenEstimate {
   classification: 'green' | 'yellow' | 'red';
 }
 
-// Placeholder mínimo — el diseño completo de Git Intelligence (Incremento
-// 3, ver 07) definirá esto con más detalle (hunks, estado de archivo,
-// etc.). Aquí solo se fija la forma mínima para que ContextPack compile.
 export interface GitDiff {
   files: { path: string; patch: string }[];
+}
+
+// ---------------------------------------------------------------------
+// Git Intelligence (Incremento 3, ver 07/GitAdapter en
+// packages/core/src/project/gitAdapter.ts) — tipos de dominio para
+// `GitAdapter.status()`/`GitAdapter.log()`. `GitDiff` (arriba) ya existía
+// como placeholder desde el Incremento 0 para `diff()`.
+// ---------------------------------------------------------------------
+
+export interface GitStatusEntry {
+  path: string;
+  // Código porcelain v1 de dos letras (index/worktree), ej. 'M ' (modificado
+  // en index), ' M' (modificado en working tree, sin stagear), '??'
+  // (sin trackear), 'A ' (agregado), 'D ' (borrado), 'R ' (renombrado —
+  // `path` ya viene resuelto a la ruta nueva, ver gitAdapter.ts).
+  code: string;
+}
+
+export interface GitStatus {
+  // `null` si es un checkout detached (sin rama) o el repo no tiene commits
+  // todavía.
+  branch: string | null;
+  clean: boolean;
+  staged: GitStatusEntry[];
+  unstaged: GitStatusEntry[];
+  untracked: string[];
+}
+
+export interface GitCommit {
+  hash: string;
+  authorName: string;
+  authorEmail: string;
+  date: string; // ISO 8601 (%aI de git log)
+  message: string;
+  // Rutas tocadas por este commit — usado por el Nivel 4 del Context
+  // Planner (04) para el boost de recencia/afinidad. Para un merge commit,
+  // v1 compara contra el primer padre (comportamiento por defecto de
+  // `git diff-tree`) — simplificación deliberada, igual que el resto del
+  // Indexer (ver indexer.ts).
+  filesChanged: string[];
 }
 
 export interface ContextPack {
@@ -142,8 +179,18 @@ export interface ContextPack {
   createdAt: string;
   task: TaskContext;
   projectKnowledge: ProjectKnowledgeDoc[];
-  relevantFiles: { path: string; content: string; score: RelevanceScore }[];
-  recentChanges?: GitDiff; // Incremento 3
+  // `compactedToSignatures`: Context Compaction (04, punto 1 — Incremento
+  // 3) reemplazó el contenido completo de este archivo por solo sus
+  // símbolos exportados (ver contextCompaction.ts) porque el pack se pasó
+  // de verde/amarillo. `undefined`/`false` en cualquier otro caso —
+  // incluida la truncación por tamaño de fileReading.ts, que es un límite
+  // de seguridad aparte, siempre activo, no una estrategia de compactación.
+  relevantFiles: { path: string; content: string; score: RelevanceScore; compactedToSignatures?: boolean }[];
+  // Diff del working tree sin commitear contra HEAD (ver gitAdapter.ts) —
+  // "qué se está tocando ahora mismo, todavía sin commitear", que
+  // complementa a Session Memory. `undefined` si el proyecto no es git, no
+  // tiene commits todavía, o no hay cambios sin commitear.
+  recentChanges?: GitDiff;
   decisionsConsidered: DecisionRecord[];
   // Session Memory real (Incremento 2, ver 07/sessionService.ts) — solo
   // presente cuando había una sesión activa (`devpilot session start`) al
@@ -173,4 +220,13 @@ export interface ContextPack {
   constraints: string[];
   responseInstructions: string;
   tokenEstimate: TokenEstimate;
+  // Context Compaction (04, Incremento 3) — presente solo cuando el pack se
+  // pasó de verde/amarillo y `contextCompaction.ts` aplicó al menos una
+  // estrategia. `undefined` en un pack 🟢 (nada que compactar). Nunca una
+  // caja negra: cada nota explica qué se compactó/quitó y por qué, para que
+  // el usuario pueda revisar la decisión (ver markdownRenderer.ts).
+  compaction?: {
+    strategiesApplied: ('signatures-only' | 'knowledge-dedup' | 'drop-lowest-score')[];
+    notes: string[];
+  };
 }

@@ -10,13 +10,17 @@ function formatValue(value: unknown): string {
 // hizo el Indexer, para que el ahorro de trabajo (o su ausencia, en
 // proyectos sin git) sea visible y no un detalle interno invisible.
 function formatReindexSummary(reindex: ReindexResult): string {
+  // `totalSymbolsIndexed` (Incremento 3, ver symbolExtractor.ts): solo
+  // cuenta símbolos de archivos TypeScript/JavaScript -- 0 en un proyecto
+  // sin ninguno, no un error.
+  const symbolsSuffix = ` — ${reindex.totalSymbolsIndexed} símbolo(s) indexado(s)`;
   switch (reindex.mode) {
     case 'skipped':
-      return `sin cambios desde el último escaneo (commit ${formatValue(reindex.currentCommit)} igual al indexado) — se saltó el reindexado, ${reindex.totalIndexed} archivo(s) en el índice`;
+      return `sin cambios desde el último escaneo (commit ${formatValue(reindex.currentCommit)} igual al indexado) — se saltó el reindexado, ${reindex.totalIndexed} archivo(s) en el índice${symbolsSuffix}`;
     case 'incremental':
-      return `reindexado incremental vía \`git diff\` — ${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} actualizado(s), ${reindex.filesRemoved} eliminado(s) (${reindex.totalIndexed} en total)`;
+      return `reindexado incremental vía \`git diff\` — ${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} actualizado(s), ${reindex.filesRemoved} eliminado(s) (${reindex.totalIndexed} en total)${symbolsSuffix}`;
     case 'full':
-      return `reindexado completo — ${reindex.totalIndexed} archivo(s) indexado(s) (${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} ya existían)`;
+      return `reindexado completo — ${reindex.totalIndexed} archivo(s) indexado(s) (${reindex.filesAdded} nuevo(s), ${reindex.filesUpdated} ya existían)${symbolsSuffix}`;
     default:
       return reindex.mode;
   }

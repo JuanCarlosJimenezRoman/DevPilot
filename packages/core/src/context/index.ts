@@ -2,6 +2,7 @@ export * from './keywords.js';
 export * from './importGraph.js';
 export * from './fileReading.js';
 export * from './relevancePlanner.js';
+export * from './contextCompaction.js';
 export * from './tokenEstimate.js';
 export * from './responseContract.js';
 export * from './clipboard.js';

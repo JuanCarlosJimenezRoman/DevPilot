@@ -9,6 +9,7 @@ import {
   insertContextPack,
   insertContextPackDecision,
   insertTaskBenchmark,
+  listAllSymbolsWithFilePath,
   listDecisions,
   openGlobalRegistryDb,
   openProjectDb,
@@ -22,6 +23,7 @@ import { copyToClipboard } from './clipboard.js';
 import { findRelevantDecisions, toDecisionRecord } from '../decisions/decisionService.js';
 import { logSessionEvent } from '../sessions/sessionEventLogger.js';
 import { listProjectKnowledgeWithContent, toProjectKnowledgeDoc } from '../knowledge/knowledgeService.js';
+import { createGitAdapter } from '../project/gitAdapter.js';
 
 // Cuántos eventos recientes de la sesión activa se incluyen en el pack
 // (04: Session Memory es memoria de CORTO plazo — un resumen, no el log
@@ -29,6 +31,13 @@ import { listProjectKnowledgeWithContent, toProjectKnowledgeDoc } from '../knowl
 // últimos son relevantes para "qué veníamos haciendo" en el momento de
 // generar este Context Pack puntual.
 const MAX_SESSION_EVENTS_IN_PACK = 10;
+
+// Nivel 4 del Context Planner (04, Incremento 3): cuántos commits recientes
+// se traen para el boost de recencia/afinidad — acotado por el mismo
+// motivo que MAX_SEED_FILES en relevancePlanner.ts, no tiene sentido traer
+// todo el historial para "refinar" candidatos que Nivel 1/2/3 ya
+// encontraron.
+const GIT_LOG_LIMIT_FOR_RELEVANCE = 50;
 
 const logger = createLogger('core:context');
 
@@ -104,6 +113,15 @@ export async function buildAndPersistContext(
     sessionDb.close();
   }
   let sessionMemory: SessionMemory | undefined;
+  // Context Compaction, estrategia 2 (04, Incremento 3, ver
+  // contextCompaction.ts): ids de knowledge docs ya enviados en un pack
+  // anterior de ESTA MISMA sesión, para no repetir su texto completo si el
+  // pack nuevo se pasa de 🟢. Solo tiene sentido si hay una sesión activa
+  // -- sin sesión no hay "packs anteriores de la misma sesión" con los que
+  // comparar. Se lee del propio log de Session Memory (cada evento
+  // 'context' ya guarda `knowledgeDocIds`, ver el `logSessionEvent` al
+  // final de esta función) en vez de reabrir los JSON de packs viejos.
+  const alreadySentKnowledgeDocIds = new Set<string>();
   if (activeSession) {
     const allEvents = await readSessionEvents(rootPath, activeSession.id);
     sessionMemory = {
@@ -115,7 +133,39 @@ export async function buildAndPersistContext(
       providerUsed: activeSession.providerUsed ?? undefined,
       events: allEvents.slice(-MAX_SESSION_EVENTS_IN_PACK),
     };
+    for (const event of allEvents) {
+      if (event.kind !== 'context') continue;
+      const ids = event.detail?.knowledgeDocIds;
+      if (Array.isArray(ids)) {
+        for (const id of ids) {
+          if (typeof id === 'string') alreadySentKnowledgeDocIds.add(id);
+        }
+      }
+    }
   }
+
+  // Git Intelligence (04/02, Incremento 3): Nivel 3 (símbolos, ver
+  // symbolRepo.ts) y Nivel 4 (Git, ver gitAdapter.ts) del Context Planner,
+  // más `recentChanges` (working tree sin commitear) para el pack. Todo
+  // opcional: un proyecto sin `devpilot project add` corrido todavía (sin
+  // símbolos indexados) o sin git simplemente no aporta esas señales —
+  // Nivel 1/2 siguen funcionando exactamente igual (ver relevancePlanner.ts).
+  const symbolsDb = openProjectDb(rootPath);
+  let symbolIndex;
+  try {
+    symbolIndex = listAllSymbolsWithFilePath(symbolsDb).map((row) => ({
+      relPath: row.filePath,
+      name: row.name,
+      isExported: row.isExported,
+    }));
+  } finally {
+    symbolsDb.close();
+  }
+
+  const git = createGitAdapter(rootPath);
+  const isGitRepo = project.vcs === 'git' && (await git.isRepo());
+  const recentCommits = isGitRepo ? await git.log({ limit: GIT_LOG_LIMIT_FOR_RELEVANCE }) : undefined;
+  const recentChanges = isGitRepo ? await git.diff() : undefined;
 
   // Project Knowledge (04/07, Incremento 2, última pieza): siempre
   // completo, sin filtrar por relevancia (ver el comentario en
@@ -138,6 +188,10 @@ export async function buildAndPersistContext(
     sessionId: activeSession?.id,
     sessionMemory,
     knowledgeDocs,
+    alreadySentKnowledgeDocIds,
+    symbolIndex,
+    recentCommits,
+    recentChanges,
     maxFiles: params.maxFiles ?? DEFAULT_MAX_FILES,
   });
 
@@ -237,6 +291,10 @@ export async function buildAndPersistContext(
     taskText: pack.task.rawText,
     filesIncluded: pack.relevantFiles.length,
     knowledgeDocsIncluded: pack.projectKnowledge.length,
+    // Context Compaction, estrategia 2 (ver más arriba en esta función y
+    // contextCompaction.ts): el PRÓXIMO Context Pack de esta misma sesión
+    // lee esto para saber qué ya no hace falta repetir completo.
+    knowledgeDocIds: pack.projectKnowledge.map((d) => d.id),
   });
 
   return { pack, markdownPath, jsonPath, copiedToClipboard, candidateCount };

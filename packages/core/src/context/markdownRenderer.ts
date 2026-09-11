@@ -177,10 +177,27 @@ export function renderContextPackMarkdown(
     lines.push('');
   }
 
+  if (pack.recentChanges && pack.recentChanges.files.length > 0) {
+    lines.push(nextSection('Cambios sin commitear'));
+    lines.push('');
+    lines.push(
+      '*(Working tree contra HEAD — ver GitAdapter, 02/07 Incremento 3. Esto es lo que se está tocando ahora mismo, todavía sin commitear; complementa a la Memoria de sesión de arriba.)*',
+    );
+    lines.push('');
+    for (const file of pack.recentChanges.files) {
+      const fence = pickFence(file.patch);
+      lines.push(`\`${file.path}\``);
+      lines.push(fence + 'diff');
+      lines.push(file.patch);
+      lines.push(fence);
+      lines.push('');
+    }
+  }
+
   lines.push(nextSection('Archivos relevantes'));
   lines.push('');
   lines.push(
-    '*(Relevancia calculada por Nivel 1 + Nivel 2 del Context Planner: coincidencia de texto/nombre de ruta + imports directos. Nivel 3/4 — símbolos AST y Git — no aplican todavía, ver roadmap.)*',
+    '*(Relevancia calculada por el Context Planner: Nivel 1 — texto/nombre de ruta —, Nivel 2 — imports directos —, Nivel 3 — símbolos exportados/declarados vía AST — y Nivel 4 — recencia y afinidad de mensaje en Git —, ver 04. Nivel 3/4 solo aportan boost a lo que Nivel 1/2 ya encontró — o, en el caso de Nivel 3, a un archivo que exporta el símbolo exacto que la tarea menciona.)*',
   );
   lines.push('');
   if (pack.relevantFiles.length === 0) {
@@ -189,7 +206,8 @@ export function renderContextPackMarkdown(
     );
   } else {
     for (const file of pack.relevantFiles) {
-      lines.push(`### \`${file.path}\` — **relevancia ${file.score.score}%**`);
+      const compactedNote = file.compactedToSignatures ? ' — ⚠️ solo firmas (Context Compaction)' : '';
+      lines.push(`### \`${file.path}\` — **relevancia ${file.score.score}%**${compactedNote}`);
       const reasonsText = file.score.reasons.map((r) => r.detail).join('; ');
       lines.push(`*Razones: ${reasonsText}*`);
       lines.push('');
@@ -206,6 +224,14 @@ export function renderContextPackMarkdown(
   const emoji = CLASSIFICATION_EMOJI[pack.tokenEstimate.classification];
   lines.push(`**≈ ${pack.tokenEstimate.totalTokens} tokens estimados** (caracteres/4) → ${emoji} \`${pack.tokenEstimate.classification}\`.`);
   lines.push('');
+  if (pack.compaction) {
+    lines.push(
+      `**Context Compaction aplicada** (${pack.compaction.strategiesApplied.join(', ')}) — el pack se pasó de 🟢, ver detalle abajo:`,
+    );
+    lines.push('');
+    for (const note of pack.compaction.notes) lines.push(`- ${note}`);
+    lines.push('');
+  }
 
   lines.push(nextSection('Instrucciones de formato de respuesta'));
   lines.push('');

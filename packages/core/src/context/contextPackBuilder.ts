@@ -1,9 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import type { ContextPack, DecisionRecord, Project, ProjectKnowledgeDoc, ProjectSnapshot, RelevanceScore, SessionMemory, TokenEstimate } from '@devpilot/shared';
-import { planRelevantFiles } from './relevancePlanner.js';
+import type {
+  ContextPack,
+  DecisionRecord,
+  GitCommit,
+  GitDiff,
+  Project,
+  ProjectKnowledgeDoc,
+  ProjectSnapshot,
+  RelevanceScore,
+  SessionMemory,
+} from '@devpilot/shared';
+import { planRelevantFiles, type SymbolIndexEntry } from './relevancePlanner.js';
 import { safeReadTextFile, truncateForPack } from './fileReading.js';
-import { estimateTokens } from './tokenEstimate.js';
 import { RESPONSE_INSTRUCTIONS_ES } from './responseContract.js';
+import { compactContextPack, type CompactableFile } from './contextCompaction.js';
 
 // Ensambla el `ContextPack` — ver 04 "Context Pack — construcción final".
 // Desde el Incremento 2 (07): las Decision Records reales (`devpilot
@@ -13,7 +23,20 @@ import { RESPONSE_INSTRUCTIONS_ES } from './responseContract.js';
 // incluye como ingrediente aparte; y Project Knowledge (ver
 // knowledgeService.ts) se incluye siempre completo, sin filtrar por
 // relevancia (ver el comentario en `knowledgeDocs` más abajo).
+//
+// Desde el Incremento 3 (07, "Git Intelligence"): Nivel 3/4 del Context
+// Planner (`symbolIndex`/`recentCommits`, ver relevancePlanner.ts),
+// `recentChanges` (GitAdapter.diff() del working tree, ver
+// contextService.ts) y Context Compaction real (contextCompaction.ts) en
+// vez del truncado plano por top-N que había antes — ver el comentario
+// junto a `compactContextPack` más abajo.
 export const DEFAULT_MAX_FILES = 8;
+
+// Piso de la estrategia 3 de Context Compaction (contextCompaction.ts):
+// nunca se baja de esta cantidad de archivos aunque el pack siga en 🔴,
+// para no terminar con un pack casi vacío en un proyecto con muchos
+// candidatos grandes.
+const MIN_FILES_AFTER_COMPACTION = 3;
 
 export interface BuildContextPackParams {
   project: Project;
@@ -36,9 +59,20 @@ export interface BuildContextPackParams {
    * contenido es información de fondo (arquitectura, convenciones) útil
    * para prácticamente cualquier tarea — filtrarlo por keyword matching
    * arriesgaría dejar afuera justo lo que el usuario espera que la IA
-   * siempre sepa. Vacío por defecto.
+   * siempre sepa. Vacío por defecto. Puede recortarse por Context
+   * Compaction (estrategia 2, ver contextCompaction.ts) si ya se envió en
+   * un pack anterior de la misma sesión — `pack.projectKnowledge` (los
+   * metadatos) sigue completo siempre, solo el TEXTO puede deduplicarse.
    */
   knowledgeDocs?: { doc: ProjectKnowledgeDoc; content: string }[];
+  /** ids de knowledge docs ya enviados en un Context Pack anterior de la MISMA sesión (ver contextService.ts) — Context Compaction, estrategia 2. Vacío por defecto (nada que deduplicar). */
+  alreadySentKnowledgeDocIds?: Set<string>;
+  /** Nivel 3 del Context Planner (04, Incremento 3) — índice de símbolos de todo el proyecto (ver symbolRepo.ts/contextService.ts). `undefined` si el proyecto no tiene símbolos indexados todavía. */
+  symbolIndex?: SymbolIndexEntry[];
+  /** Nivel 4 del Context Planner (04, Incremento 3) — commits recientes ya obtenidos vía GitAdapter.log() (ver contextService.ts). `undefined` si el proyecto no es git. */
+  recentCommits?: GitCommit[];
+  /** Diff del working tree sin commitear contra HEAD (GitAdapter.diff(), ver contextService.ts) — `undefined` si no hay cambios sin commitear o el proyecto no es git. */
+  recentChanges?: GitDiff;
   maxFiles?: number;
 }
 
@@ -59,6 +93,10 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     sessionId,
     sessionMemory,
     knowledgeDocs = [],
+    alreadySentKnowledgeDocIds = new Set<string>(),
+    symbolIndex,
+    recentCommits,
+    recentChanges,
     maxFiles = DEFAULT_MAX_FILES,
   } = params;
 
@@ -74,16 +112,14 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     ...confirmedDecisions,
   ];
 
-  const { keywords, candidates } = planRelevantFiles(project.rootPath, taskText);
+  const { keywords, candidates } = planRelevantFiles(project.rootPath, taskText, { symbolIndex, recentCommits });
 
-  // Context Compaction (ver 04, punto 3): cortar por umbral de relevancia
-  // (top-N) en vez de incluir todo lo que superó el Nivel 2. v1 no trunca
-  // por símbolos (Incremento 2) — trunca el contenido de cada archivo
-  // grande individualmente (ver fileReading.ts).
-  const selected = candidates.slice(0, maxFiles);
-
-  const relevantFiles: ContextPack['relevantFiles'] = [];
-  for (const candidate of selected) {
+  // Semilla de archivos para Context Compaction (contextCompaction.ts):
+  // top-N por score, contenido COMPLETO (truncado solo por el límite de
+  // tamaño de fileReading.ts) — compactContextPack decide después, según
+  // el tamaño real del pack, si hace falta recortar más.
+  const rawFiles: CompactableFile[] = [];
+  for (const candidate of candidates.slice(0, maxFiles)) {
     const content = safeReadTextFile(candidate.absPath);
     if (content === null) continue; // desapareció o es binario entre el escaneo y ahora — se omite, no se rompe el pack
     const score: RelevanceScore = {
@@ -91,7 +127,11 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
       score: candidate.score,
       reasons: candidate.reasons,
     };
-    relevantFiles.push({ path: candidate.relPath, content: truncateForPack(content), score });
+    // `rawContent` sin truncar viaja aparte para que Context Compaction
+    // (contextCompaction.ts, estrategia 1) pueda extraer símbolos contra
+    // el archivo completo, nunca contra `content` ya truncado — ver el
+    // comentario en la interfaz `CompactableFile`.
+    rawFiles.push({ path: candidate.relPath, content: truncateForPack(content), rawContent: content, score });
   }
 
   const sessionMemoryText = sessionMemory
@@ -101,24 +141,33 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
       ].join('\n')
     : '';
 
-  // Mismo patrón que `businessDecisions.confirmed` respecto de
-  // `decisionsConsidered`: `knowledgeDocs` (con contenido) se aplana a
-  // texto para el prompt/tokenParts; el pack solo guarda la metadata
-  // (`ProjectKnowledgeDoc[]`, sin contenido — ver 02/03, el archivo real
-  // sigue siendo la fuente de verdad).
-  const projectKnowledgeText = knowledgeDocs
-    .map(({ doc, content }) => `## ${doc.title}\n\n${content}`)
-    .join('\n\n---\n\n');
-
-  const tokenParts = [
+  const otherParts = [
     { label: 'tarea', text: taskText },
     { label: 'decisiones', text: [...allConfirmedDecisions, ...openDecisions, ...constraints].join('\n') },
     { label: 'instrucciones', text: RESPONSE_INSTRUCTIONS_ES },
-    ...(projectKnowledgeText ? [{ label: 'project knowledge', text: projectKnowledgeText }] : []),
     ...(sessionMemoryText ? [{ label: 'memoria de sesión', text: sessionMemoryText }] : []),
-    ...relevantFiles.map((f) => ({ label: f.path, text: f.content })),
   ];
-  const tokenEstimate: TokenEstimate = estimateTokens(tokenParts);
+
+  // Context Compaction (04, Incremento 3, contextCompaction.ts): aplica
+  // las tres estrategias documentadas SOLO si el pack se pasa de 🟢 — un
+  // pack verde sale de acá sin tocar (mismos `rawFiles`/knowledge
+  // completo). Reemplaza el truncado plano por top-N que había antes de
+  // esta pieza (ese top-N sigue existiendo arriba, en `candidates.slice(0,
+  // maxFiles)` — es la semilla, no la compactación en sí).
+  const compaction = compactContextPack({
+    files: rawFiles,
+    knowledge: knowledgeDocs,
+    alreadySentKnowledgeDocIds,
+    otherParts,
+    minFiles: Math.min(MIN_FILES_AFTER_COMPACTION, maxFiles),
+  });
+
+  const relevantFiles: ContextPack['relevantFiles'] = compaction.files.map((f) => ({
+    path: f.path,
+    content: f.content,
+    score: f.score,
+    ...(f.compactedToSignatures ? { compactedToSignatures: true as const } : {}),
+  }));
 
   const pack: ContextPack = {
     id: randomUUID(),
@@ -142,9 +191,11 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     },
     constraints,
     responseInstructions: RESPONSE_INSTRUCTIONS_ES,
-    tokenEstimate,
+    tokenEstimate: compaction.tokenEstimate,
     ...(sessionMemory ? { sessionMemory } : {}),
-    ...(projectKnowledgeText ? { projectKnowledgeText } : {}),
+    ...(compaction.knowledgeText ? { projectKnowledgeText: compaction.knowledgeText } : {}),
+    ...(recentChanges && recentChanges.files.length > 0 ? { recentChanges } : {}),
+    ...(compaction.compaction ? { compaction: compaction.compaction } : {}),
   };
 
   return { pack, candidateCount: candidates.length, keywords };
