@@ -43,26 +43,40 @@ ese caso, simplemente copia/pega a mano como siempre.
 Después de cada cambio en `src/`, hay que volver a correr el build y luego
 pulsar "Actualizar" en `chrome://extensions` (o recargar la extensión).
 
-## Estado de validación — pendiente de prueba real (igual que cada incremento anterior)
+## Estado de validación
 
 Los selectores específicos de cada sitio (`src/adapters/*.ts`) son mejor
 esfuerzo: los tres sitios son SPAs de terceros que cambian su HTML sin
 aviso, así que cada uno tiene una heurística genérica de respaldo
 (`src/core/dom-utils.ts`) que se activa si el selector específico no
-encuentra nada. Esto compila y lintea limpio (`tsc`/`eslint`), pero —
-siguiendo el mismo patrón que Incremento 4 (sesión 8 solo con mocks, sesión
-9 validado de punta a punta por Juan contra Claude Code real) — **todavía
-no se probó contra los sitios reales**, porque cargar una extensión
-descomprimida requiere el diálogo nativo "Cargar descomprimida" de Chrome,
-que no es automatizable de forma remota.
+encuentra nada.
 
-Pendiente para la próxima sesión (o para Juan directamente): cargarla en
-Chrome y probar los dos botones en los tres sitios, una sesión logueada por
-sitio. Si algún selector específico falla, lo más probable es que la
-heurística genérica de respaldo lo compense (aunque de forma menos precisa)
-— y si ni así funciona, el widget debe decirlo explícitamente en vez de
-fallar en silencio. Cualquier selector roto encontrado en esa prueba real es
-un ajuste puntual en el adapter correspondiente, no un rediseño.
+**Validado en vivo (sesión 11)** contra el DOM real de claude.ai, ChatGPT y
+DeepSeek Chat, con sesión logueada en los tres — sin necesitar cargar la
+extensión empaquetada: se inyectó el JS ya compilado de `dist/` directo en
+pestañas reales vía Claude in Chrome y se ejecutó cada función del adapter
+contra el DOM real, insertando y borrando texto de prueba sin llegar nunca
+a enviar un mensaje real. Se encontraron y corrigieron selectores que
+estaban mal adivinados — el detalle completo está en
+`docs/architecture/07-roadmap.md`, sección Incremento 5. En resumen:
+composer y botón de envío eran correctos en los tres sitios (con ajustes
+menores); el selector de "última respuesta del asistente" estaba mal en
+Claude.ai y DeepSeek (corregidos a `[data-perf-row="assistant"]` +
+`.standard-markdown`/`.progressive-markdown` en Claude.ai,
+`.ds-assistant-message-main-content` en DeepSeek) y era correcto tal cual en
+ChatGPT.
+
+**Lo único que sigue sin validarse, y no se puede automatizar de forma
+remota**: cargar la extensión descomprimida de verdad en `chrome://extensions`
+(el diálogo nativo no es accesible por automatización) y confirmar que el
+botón "Copiar última respuesta" escribe al portapapeles con un clic físico
+real — la Clipboard API exige foco real de documento a nivel de sistema
+operativo, algo que una pestaña controlada por automatización nunca tiene
+("Document is not focused"). El código ya maneja ese caso explícito (mensaje
+de error accionable en vez de fallar en silencio), pero confirmar el camino
+feliz de punta a punta necesita que alguien lo pruebe con la extensión
+cargada de verdad. Si eso funciona, este incremento queda cerrado sin
+necesitar más cambios de código.
 
 ## Por qué no hay bundler
 

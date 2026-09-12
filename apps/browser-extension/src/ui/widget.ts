@@ -4,6 +4,11 @@
 // más, cada una con feedback explícito de éxito/fallo — nunca una acción
 // silenciosa, mismo criterio que el resto del proyecto.
 
+/** "Document is not focused" es el mensaje real (validado en vivo, sesión 11) que tira la Clipboard API cuando el documento pierde el foco justo al momento del clic — no es un permiso denegado, así que se distingue para dar un mensaje accionable en vez de uno genérico. */
+function devpilotIsFocusError(err: unknown): boolean {
+  return err instanceof Error && /focus/i.test(err.message);
+}
+
 function devpilotSetStatus(statusEl: HTMLElement, message: string, kind: 'ok' | 'warn' | 'error'): void {
   statusEl.textContent = message;
   statusEl.style.color = kind === 'ok' ? '#5eead4' : kind === 'warn' ? '#fbbf24' : '#f87171';
@@ -96,8 +101,14 @@ function devpilotMountWidget(adapter: DevPilotSiteAdapter): void {
       let text: string;
       try {
         text = await navigator.clipboard.readText();
-      } catch {
-        devpilotSetStatus(status, 'No pude leer el portapapeles (permiso denegado). Pégalo a mano (Ctrl/Cmd+V).', 'error');
+      } catch (err) {
+        // "Document is not focused" es un error real y conocido de la
+        // Clipboard API (validado en vivo, sesión 11) — pasa si el clic
+        // llega justo cuando la página pierde el foco (ej. venir de otra
+        // ventana). No es un permiso denegado de verdad, así que el
+        // mensaje lo distingue en vez de asumir siempre lo mismo.
+        const hint = devpilotIsFocusError(err) ? 'hacé clic en la página y probá de nuevo' : 'revisá el permiso de portapapeles';
+        devpilotSetStatus(status, `No pude leer el portapapeles (${hint}). Pégalo a mano (Ctrl/Cmd+V).`, 'error');
         return;
       }
       if (!text) {
@@ -124,8 +135,9 @@ function devpilotMountWidget(adapter: DevPilotSiteAdapter): void {
       try {
         await navigator.clipboard.writeText(text);
         devpilotSetStatus(status, `Copiado (${text.length} caracteres) — pégalo en \`devpilot import\`.`, 'ok');
-      } catch {
-        devpilotSetStatus(status, 'No pude escribir en el portapapeles (permiso denegado).', 'error');
+      } catch (err) {
+        const hint = devpilotIsFocusError(err) ? 'hacé clic en la página y probá de nuevo' : 'revisá el permiso de portapapeles';
+        devpilotSetStatus(status, `No pude escribir en el portapapeles (${hint}).`, 'error');
       }
     })();
   });

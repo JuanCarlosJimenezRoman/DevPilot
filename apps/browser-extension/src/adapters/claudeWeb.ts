@@ -1,8 +1,11 @@
-// Adapter para claude.ai. Selectores específicos son "mejor esfuerzo": el
-// sitio puede cambiar su HTML en cualquier momento (ver nota de robustez de
-// 06 sobre providers). Por eso cada función cae a la heurística genérica de
-// dom-utils.ts si el selector específico no encuentra nada, en vez de
-// fallar directo.
+// Adapter para claude.ai. Selectores validados en vivo (sesión 11, ver
+// docs/architecture/07-roadmap.md) contra el DOM real de claude.ai
+// (2026-09-12) usando Claude in Chrome para inspeccionar la página sin
+// necesidad de cargar la extensión empaquetada — composer, botón de envío y
+// el contenido real del último mensaje del asistente confirmados contra una
+// sesión real logueada. Cada selector específico sigue teniendo la
+// heurística genérica de dom-utils.ts como respaldo, porque el sitio puede
+// cambiar este HTML en cualquier momento sin aviso.
 
 function claudeMatchesHostname(hostname: string): boolean {
   return hostname === 'claude.ai' || hostname.endsWith('.claude.ai');
@@ -10,7 +13,7 @@ function claudeMatchesHostname(hostname: string): boolean {
 
 function claudeFindComposer(): HTMLElement | null {
   const specific = document.querySelector<HTMLElement>(
-    'div[contenteditable="true"].ProseMirror, div[contenteditable="true"][aria-label*="Claude" i], div[contenteditable="true"][aria-label*="prompt" i]',
+    '[data-testid="chat-input"] div[contenteditable="true"], div[contenteditable="true"].ProseMirror',
   );
   return specific ?? devpilotFindGenericComposer();
 }
@@ -20,9 +23,8 @@ function claudeInsertText(composer: HTMLElement, text: string): void {
 }
 
 function claudeTrySubmit(composer: HTMLElement): boolean {
-  const form = composer.closest('form');
-  const button = (form ?? document).querySelector<HTMLButtonElement>(
-    'button[aria-label*="Send" i], button[aria-label*="Enviar" i]',
+  const button = document.querySelector<HTMLButtonElement>(
+    '[data-testid="chat-input-send"], button[aria-label*="Enviar" i], button[aria-label*="Send" i]',
   );
   if (button && !button.disabled) {
     button.click();
@@ -32,12 +34,28 @@ function claudeTrySubmit(composer: HTMLElement): boolean {
 }
 
 function claudeFindLatestAssistantMessageText(): string | null {
-  const nodes = document.querySelectorAll<HTMLElement>(
+  // `[data-perf-row="assistant"]` es la fila real del último mensaje del
+  // asistente (el transcript de claude.ai está virtualizado: normalmente
+  // solo la fila visible/última existe en el DOM). Dentro de esa fila,
+  // `.standard-markdown`/`.progressive-markdown` es el contenido real
+  // renderizado — evita capturar el resumen de herramientas usadas
+  // ("Se usaron N herramientas...") que Cowork agrega arriba del mensaje.
+  const rows = document.querySelectorAll<HTMLElement>('[data-perf-row="assistant"]');
+  const lastRow = rows.length > 0 ? rows[rows.length - 1] : undefined;
+  if (lastRow) {
+    const markdown = lastRow.querySelector<HTMLElement>('.standard-markdown, .progressive-markdown');
+    const text = (markdown ?? lastRow).innerText?.trim();
+    if (text) return text;
+  }
+
+  // Selectores de respaldo por si el sitio deja de usar `data-perf-row`.
+  const legacyNodes = document.querySelectorAll<HTMLElement>(
     '[data-testid="chat-message-content"], [data-testid="message-content"]',
   );
-  const last = nodes.length > 0 ? nodes[nodes.length - 1] : undefined;
-  const text = last?.innerText?.trim();
-  if (text) return text;
+  const legacyLast = legacyNodes.length > 0 ? legacyNodes[legacyNodes.length - 1] : undefined;
+  const legacyText = legacyLast?.innerText?.trim();
+  if (legacyText) return legacyText;
+
   return devpilotFindGenericLatestMessage(claudeFindComposer());
 }
 
