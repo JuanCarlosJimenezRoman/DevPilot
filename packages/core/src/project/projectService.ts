@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createLogger } from '@devpilot/shared';
 import type { Project, ProjectSnapshot, ProjectState } from '@devpilot/shared';
 import {
+  findMostRecentProjectState,
+  findProjectById,
   findProjectByRootPath,
   getProjectState,
   insertProject,
@@ -50,8 +52,34 @@ export async function addProject(rawPath: string): Promise<AddProjectResult> {
       project = { ...existing, updatedAt: now };
       logger.debug('proyecto ya registrado, re-escaneando', project.id);
     } else {
+      // Antes de generar un id nuevo, hay que revisar si esta carpeta ya
+      // tiene un `.devpilot/devpilot.db` con `project_state` real — pasa
+      // cuando el registro global no conoce todavía esta ruta (se
+      // reseteó, o nunca la vio) pero el proyecto ya fue escaneado antes
+      // (bug real encontrado en sesión 9, ver limitación #15 del handoff:
+      // cada sesión de este bridge con su propio `$HOME` efímero generaba
+      // un `project_id` nuevo cada vez, dejando filas huérfanas en
+      // `project_state`). Reutilizar ese id evita sumar más filas
+      // huérfanas y a la vez re-registra el proyecto en el catálogo
+      // global bajo el mismo id de siempre.
+      const localDbForReuse = openProjectDb(rootPath);
+      let reusableId: string | null;
+      try {
+        reusableId = findMostRecentProjectState(localDbForReuse)?.projectId ?? null;
+      } finally {
+        localDbForReuse.close();
+      }
+      // Defensa en profundidad: si ese id ya está tomado por OTRA ruta en
+      // el registro global (coincidencia extremadamente improbable con
+      // UUIDs, pero no imposible), no lo reutilizamos — mejor un id nuevo
+      // que un INSERT que viola la PK de `projects` o mezcla el estado de
+      // dos proyectos distintos.
+      if (reusableId && findProjectById(registryDb, reusableId)) {
+        reusableId = null;
+      }
+
       project = {
-        id: randomUUID(),
+        id: reusableId ?? randomUUID(),
         name: path.basename(rootPath),
         rootPath,
         vcs: detectVcs(rootPath),
@@ -59,7 +87,10 @@ export async function addProject(rawPath: string): Promise<AddProjectResult> {
         updatedAt: now,
       };
       insertProject(registryDb, project);
-      logger.debug('proyecto nuevo registrado', project.id);
+      logger.debug(
+        reusableId ? 'proyecto reencontrado por estado local, reusando id' : 'proyecto nuevo registrado',
+        project.id,
+      );
     }
   } finally {
     registryDb.close();

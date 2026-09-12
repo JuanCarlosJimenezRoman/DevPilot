@@ -31,6 +31,28 @@ export function getProjectState(db: DatabaseSync, projectId: string): ProjectSta
   return row ? rowToState(row as ProjectStateRow) : null;
 }
 
+/**
+ * Devuelve el `project_state` más reciente que ya exista en esta base local
+ * de proyecto, sin necesitar conocer de antemano el `project_id` — a
+ * diferencia de `getProjectState`, que exige el id.
+ *
+ * Usado por `addProject` (`@devpilot/core`) para reutilizar un id local ya
+ * indexado en vez de generar uno nuevo cuando el registro global no conoce
+ * todavía esta ruta (pasa si el registro global se resetea o nunca vio este
+ * proyecto, pero `.devpilot/devpilot.db` ya tiene estado real de un
+ * `project add` anterior — ver limitación #15 del handoff). Si por este
+ * mismo bug en sesiones anteriores llegó a haber más de una fila
+ * (project_state con varios project_id distintos para el mismo proyecto
+ * físico), se queda con la de `last_scan_at` más reciente en vez de
+ * elegir una al azar.
+ */
+export function findMostRecentProjectState(db: DatabaseSync): ProjectState | null {
+  const row = db
+    .prepare('SELECT * FROM project_state ORDER BY last_scan_at DESC LIMIT 1')
+    .get() as unknown | undefined;
+  return row ? rowToState(row as ProjectStateRow) : null;
+}
+
 export function upsertProjectState(db: DatabaseSync, state: ProjectState): void {
   db.prepare(
     `INSERT INTO project_state
