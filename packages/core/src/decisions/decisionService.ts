@@ -23,6 +23,35 @@ import { logSessionEvent } from '../sessions/sessionEventLogger.js';
 // que `tool_invocations` (devpilot apply) y `task_benchmarks` (devpilot
 // benchmark) en el Incremento 1.
 
+export class EmptyDecisionFieldError extends Error {
+  readonly code = 'EMPTY_DECISION_FIELD';
+  readonly field: 'title' | 'context' | 'decision';
+
+  constructor(field: 'title' | 'context' | 'decision') {
+    const label = field === 'title' ? 'título' : field === 'context' ? '--context' : '--decision';
+    super(
+      `El campo ${label} no puede estar vacío. \`devpilot decide\` necesita ese contenido para ` +
+        'crear una Decision Record con sentido (ver 04, formato tipo ADR).',
+    );
+    this.name = 'EmptyDecisionFieldError';
+    this.field = field;
+  }
+}
+
+/**
+ * Igual que \`assertNonEmptyTask\` en contextPackBuilder.ts (mismo patrón:
+ * falla explícito antes de tocar disco/SQLite en vez de dejar pasar un
+ * título o contexto en blanco). \`consequences\`, \`relatedFiles\` y \`tags\`
+ * son opcionales por diseño, así que no se validan acá.
+ */
+export function assertNonEmptyDecisionParams(
+  params: Pick<CreateDecisionParams, 'title' | 'context' | 'decisionText'>,
+): void {
+  if (params.title.trim().length === 0) throw new EmptyDecisionFieldError('title');
+  if (params.context.trim().length === 0) throw new EmptyDecisionFieldError('context');
+  if (params.decisionText.trim().length === 0) throw new EmptyDecisionFieldError('decision');
+}
+
 function resolveProjectOrThrow(rootPath: string): void {
   const registryDb = openGlobalRegistryDb();
   try {
@@ -53,6 +82,7 @@ export interface CreateDecisionResult {
 
 /** `devpilot decide "<título>"`: crea una Decision Record — memoria de largo plazo, nunca se borra (ver `supersedeDecision` para cómo se "cierra" una). */
 export async function createDecision(params: CreateDecisionParams): Promise<CreateDecisionResult> {
+  assertNonEmptyDecisionParams(params);
   const rootPath = path.resolve(params.rawPath);
   resolveProjectOrThrow(rootPath);
 

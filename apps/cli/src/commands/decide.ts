@@ -1,5 +1,11 @@
 import type { Command } from 'commander';
-import { createDecision, getProjectDecision, listProjectDecisions, supersedeDecision } from '@devpilot/core';
+import {
+  createDecision,
+  EmptyDecisionFieldError,
+  getProjectDecision,
+  listProjectDecisions,
+  supersedeDecision,
+} from '@devpilot/core';
 
 function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
@@ -37,9 +43,16 @@ export function registerDecideCommand(program: Command): void {
           status: string;
         },
       ) => {
-        if (!options.context || !options.decision) {
+        if (titulo.trim().length === 0) {
           console.error(
-            'Hacen falta `--context "<por qué>"` y `--decision "<qué se decidió>"` para crear una Decision Record con sentido (ver 04, formato tipo ADR).',
+            'El título no puede estar vacío. `devpilot decide "<título>"` necesita un título real para crear la Decision Record.',
+          );
+          process.exitCode = 1;
+          return;
+        }
+        if (!options.context || options.context.trim().length === 0 || !options.decision || options.decision.trim().length === 0) {
+          console.error(
+            'Hacen falta `--context "<por qué>"` y `--decision "<qué se decidió>"` (no vacíos) para crear una Decision Record con sentido (ver 04, formato tipo ADR).',
           );
           process.exitCode = 1;
           return;
@@ -69,7 +82,11 @@ export function registerDecideCommand(program: Command): void {
           console.log(`  Espejo:  ${markdownPath}`);
           console.log('`devpilot context` la va a considerar automáticamente en tareas futuras relacionadas.');
         } catch (err) {
-          console.error(`Error al crear la decisión: ${(err as Error).message}`);
+          if (err instanceof EmptyDecisionFieldError) {
+            console.error(`✖ ${err.message}`);
+          } else {
+            console.error(`Error al crear la decisión: ${(err as Error).message}`);
+          }
           process.exitCode = 1;
         }
       },
