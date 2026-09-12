@@ -4,3 +4,4 @@ dist/
 .devpilot/
 *.log
 .DS_Store
+.pnpm-store/
