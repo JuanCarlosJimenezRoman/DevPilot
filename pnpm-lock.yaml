@@ -27,6 +27,8 @@ importers:
         specifier: ^8.15.0
         version: 8.70.0(eslint@9.39.5)(typescript@5.9.3)
 
+  apps/browser-extension: {}
+
   apps/cli:
     dependencies:
       '@devpilot/core':
@@ -47,12 +49,21 @@ importers:
       '@devpilot/storage':
         specifier: workspace:*
         version: link:../storage
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       diff:
         specifier: ^9.0.0
         version: 9.0.0
       ignore:
         specifier: ^6.0.2
         version: 6.0.2
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
 
   packages/shared: {}
 
@@ -277,6 +288,9 @@ packages:
   '@humanwhocodes/retry@0.4.3':
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
@@ -851,6 +865,10 @@ snapshots:
   '@humanwhocodes/module-importer@1.0.1': {}
 
   '@humanwhocodes/retry@0.4.3': {}
+
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/estree@1.0.9': {}
 

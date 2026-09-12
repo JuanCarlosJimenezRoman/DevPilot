@@ -38,6 +38,39 @@ export const DEFAULT_MAX_FILES = 8;
 // candidatos grandes.
 const MIN_FILES_AFTER_COMPACTION = 3;
 
+/**
+ * Error de validación de entrada del Context Pack. Se lanza ANTES de
+ * generar nada (ni planner, ni lectura de archivos, ni compaction) cuando
+ * `taskText` no es una tarea real. El caller (hoy `devpilot context`, ver
+ * apps/cli/src/commands/context.ts) debe mostrarlo tal cual al usuario en
+ * vez de propagar un stack trace.
+ */
+export class EmptyTaskError extends Error {
+  readonly code = 'EMPTY_TASK';
+  constructor() {
+    super(
+      'La tarea está vacía. `devpilot context` necesita una descripción de la tarea ' +
+        'para decidir qué archivos incluir en el Context Pack — pasala como argumento ' +
+        '(ej. `devpilot context "agregar validación de max-files"`).',
+    );
+    this.name = 'EmptyTaskError';
+  }
+}
+
+/**
+ * Guard de entrada compartido por `buildContextPack` y por el CLI (ver
+ * apps/cli/src/commands/context.ts): una tarea vacía o hecha solo de
+ * espacios no es una tarea, y generar un pack con `<tarea>` en blanco es
+ * peor que fallar rápido (el pack se ve "válido" pero no tiene de dónde
+ * inferir relevancia). Exportado para que el borde del CLI pueda fallar
+ * ANTES de tocar el planner/lectura de archivos, no recién adentro.
+ */
+export function assertNonEmptyTask(taskText: string): void {
+  if (taskText.trim().length === 0) {
+    throw new EmptyTaskError();
+  }
+}
+
 export interface BuildContextPackParams {
   project: Project;
   snapshot: ProjectSnapshot;
@@ -99,6 +132,8 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     recentChanges,
     maxFiles = DEFAULT_MAX_FILES,
   } = params;
+
+  assertNonEmptyTask(taskText);
 
   // Las Decision Records reales se muestran igual que las confirmadas
   // escritas a mano (mismo texto plano en el Markdown/prompt final — la IA

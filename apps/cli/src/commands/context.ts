@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { buildAndPersistContext } from '@devpilot/core';
+import { assertNonEmptyTask, buildAndPersistContext, EmptyTaskError } from '@devpilot/core';
 
 function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
@@ -27,6 +27,14 @@ export function registerContextCommand(program: Command): void {
         options: { project: string; confirmed: string[]; open: string[]; constraint: string[]; maxFiles: string },
       ) => {
         try {
+          // Falla rápido, antes de tocar el planner/lectura de archivos ni
+          // el registro de proyectos: una tarea vacía o solo espacios no
+          // es una tarea (ver `assertNonEmptyTask` en contextPackBuilder.ts,
+          // que es la red de seguridad para cualquier otro caller — esta
+          // validación acá es la que da el error claro y temprano al
+          // usuario del CLI).
+          assertNonEmptyTask(tarea);
+
           const result = await buildAndPersistContext({
             rawPath: options.project,
             taskText: tarea,
@@ -62,7 +70,11 @@ export function registerContextCommand(program: Command): void {
               : '  No se pudo copiar al portapapeles automáticamente — copia el contenido del Markdown de arriba a mano.',
           );
         } catch (err) {
-          console.error(`Error al generar el Context Pack: ${(err as Error).message}`);
+          if (err instanceof EmptyTaskError) {
+            console.error(`✖ ${err.message}`);
+          } else {
+            console.error(`Error al generar el Context Pack: ${(err as Error).message}`);
+          }
           process.exitCode = 1;
         }
       },
