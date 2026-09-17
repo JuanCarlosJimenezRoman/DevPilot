@@ -23,7 +23,7 @@ export function registerContextCommand(program: Command): void {
     .option('--max-files <n>', 'Máximo de archivos a incluir en el pack (compactación)', '8')
     .option(
       '--include <ruta>',
-      'Fuerza que este archivo entre al pack completo, sin importar su score de relevancia (repetible). Para cuando ya sabés qué archivo hace falta — ej. el que vas a refactorizar, que casi nunca matchea bien por keywords porque todavía no tiene el vocabulario del patrón objetivo.',
+      'Fuerza que este archivo entre al pack completo, sin importar su score de relevancia (repetible). Desde sesión 14, `devpilot context` ya detecta solo el archivo que la tarea menciona con su ruta completa (y, si existe, el archivo de rutas de backend del mismo dominio) — usá este flag para casos que la auto-detección no cubre, ej. una página que combina varios dominios de backend.',
       collect,
       [],
     )
@@ -65,8 +65,18 @@ export function registerContextCommand(program: Command): void {
             `  Archivos incluidos: ${pack.relevantFiles.length} de ${result.candidateCount} candidato(s) encontrados`,
           );
           for (const file of pack.relevantFiles) {
-            const forced = file.score.reasons.some((r) => r.kind === 'explicit-include');
-            console.log(`    - ${file.path} (${file.score.score}%)${forced ? '  📌 forzado con --include' : ''}`);
+            // `explicit-include` cubre tres orígenes desde la auto-inclusión
+            // de sesión 14 (ver relevancePlanner.ts/autoInclude.ts): el
+            // `--include` manual del usuario, el archivo objetivo
+            // auto-detectado por mención completa en la tarea, y un archivo
+            // de rutas de backend del mismo dominio auto-detectado — el
+            // `detail` de la razón ya distingue cuál de los tres fue, se
+            // muestra tal cual en vez de un texto genérico para que quede
+            // claro por qué entró.
+            const includeReason = file.score.reasons.find((r) => r.kind === 'explicit-include');
+            console.log(
+              `    - ${file.path} (${file.score.score}%)${includeReason ? `  📌 ${includeReason.detail}` : ''}`,
+            );
           }
           if (result.missingIncludePaths.length > 0) {
             console.error(

@@ -4,6 +4,7 @@ import { listProjectFiles } from '../project/fileWalker.js';
 import { extractKeywords } from './keywords.js';
 import { resolveLocalImports } from './importGraph.js';
 import { safeReadTextFile } from './fileReading.js';
+import { detectExplicitFileMentions, detectRelatedBackendFiles } from './autoInclude.js';
 
 // Context Planner — Niveles 1-4, ver 04. **Simple y medible, no
 // "superinteligente"**: cada score es una suma de contribuciones
@@ -172,12 +173,32 @@ function finalScore(entry: ScoreEntry): number {
 /** Corre el Context Planner (Nivel 1-4, según qué venga en `options`) sobre `rootPath` para la tarea `taskText`. Devuelve candidatos ordenados por score, cada uno con sus razones — nunca "confía y ya", siempre explicable (ver 04). */
 export function planRelevantFiles(rootPath: string, taskText: string, options: PlanOptions = {}): PlanResult {
   const keywords = extractKeywords(taskText);
-  const hasIncludePaths = Boolean(options.includePaths && options.includePaths.length > 0);
+  const files = listProjectFiles(rootPath);
+
+  // Auto-inclusión (sesión 14, "uso real" ronda 1 — ver el comentario
+  // grande en autoInclude.ts para los dos bugs reales que motivaron esto).
+  // Dos señales que garantizan inclusión en el pack exactamente igual que
+  // `--include` manual (mismo mecanismo, más abajo), pero sin que el
+  // usuario tenga que saber de antemano que hacía falta pedirlo. Se
+  // calculan siempre — son baratas (`files` ya está en memoria) y
+  // complementan, nunca reemplazan, lo que el usuario haya pedido a mano.
+  const manualIncludeRelPaths = (options.includePaths ?? []).map((raw) => normalizeIncludePath(rootPath, raw));
+  const explicitMentions = detectExplicitFileMentions(files, taskText).filter(
+    (m) => !manualIncludeRelPaths.includes(m.relPath),
+  );
+  const relatedBackendFiles = detectRelatedBackendFiles(files, [
+    ...manualIncludeRelPaths,
+    ...explicitMentions.map((m) => m.relPath),
+  ]).filter(
+    (m) => !manualIncludeRelPaths.includes(m.relPath) && !explicitMentions.some((e) => e.relPath === m.relPath),
+  );
+  const autoIncludes = [...explicitMentions, ...relatedBackendFiles];
+
+  const hasIncludePaths = manualIncludeRelPaths.length > 0 || autoIncludes.length > 0;
   if (keywords.length === 0 && !hasIncludePaths) {
     return { keywords, candidates: [] };
   }
 
-  const files = listProjectFiles(rootPath);
   const scores = new Map<string, ScoreEntry>();
 
   // Nivel 1 — coincidencia de texto + nombre de ruta
@@ -336,13 +357,19 @@ export function planRelevantFiles(rootPath: string, taskText: string, options: P
   // (ahí es donde se sabe si el archivo se pudo leer o no).
   if (hasIncludePaths) {
     const byRelPath = new Map(candidates.map((c) => [c.relPath, c]));
-    for (const rawPath of options.includePaths ?? []) {
-      const relPath = normalizeIncludePath(rootPath, rawPath);
-      const reason: RelevanceReason = {
-        kind: 'explicit-include',
-        weight: 100,
+    // Manuales (`--include` explícito del usuario) primero, después los dos
+    // tipos de auto-inclusión — mismo mecanismo para los tres (score 100,
+    // nunca truncado en contextPackBuilder.ts), solo cambia el texto de
+    // `detail` para que quede claro en el pack/CLI por qué entró cada uno.
+    const allIncludes: { relPath: string; detail: string }[] = [
+      ...manualIncludeRelPaths.map((relPath) => ({
+        relPath,
         detail: 'archivo indicado explícitamente con --include',
-      };
+      })),
+      ...autoIncludes,
+    ];
+    for (const { relPath, detail } of allIncludes) {
+      const reason: RelevanceReason = { kind: 'explicit-include', weight: 100, detail };
       const existing = byRelPath.get(relPath);
       if (existing) {
         existing.score = 100;
