@@ -10,7 +10,7 @@ import type {
   RelevanceScore,
   SessionMemory,
 } from '@devpilot/shared';
-import { planRelevantFiles, type SymbolIndexEntry } from './relevancePlanner.js';
+import { normalizeIncludePath, planRelevantFiles, type SymbolIndexEntry } from './relevancePlanner.js';
 import { safeReadTextFile, truncateForPack } from './fileReading.js';
 import { RESPONSE_INSTRUCTIONS_ES } from './responseContract.js';
 import { compactContextPack, type CompactableFile } from './contextCompaction.js';
@@ -107,12 +107,16 @@ export interface BuildContextPackParams {
   /** Diff del working tree sin commitear contra HEAD (GitAdapter.diff(), ver contextService.ts) — `undefined` si no hay cambios sin commitear o el proyecto no es git. */
   recentChanges?: GitDiff;
   maxFiles?: number;
+  /** `--include <ruta>` (07, sesión 13) — ver el comentario en `PlanOptions.includePaths` de relevancePlanner.ts. Vacío por defecto (comportamiento idéntico a antes de esta pieza). */
+  includePaths?: string[];
 }
 
 export interface BuildContextPackResult {
   pack: ContextPack;
   candidateCount: number; // cuántos archivos encontró el planner antes de compactar a maxFiles
   keywords: string[];
+  /** Rutas de `includePaths` que se pidieron pero NO terminaron en el pack (no existen en el proyecto, o no se pudieron leer como texto — ver `safeReadTextFile`). Vacío si todas se incluyeron o no se pidió ninguna. El caller (contextService.ts/CLI) es quien avisa al usuario — acá solo se detecta. */
+  missingIncludePaths: string[];
 }
 
 export function buildContextPack(params: BuildContextPackParams): BuildContextPackResult {
@@ -131,6 +135,7 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     recentCommits,
     recentChanges,
     maxFiles = DEFAULT_MAX_FILES,
+    includePaths = [],
   } = params;
 
   assertNonEmptyTask(taskText);
@@ -147,13 +152,20 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     ...confirmedDecisions,
   ];
 
-  const { keywords, candidates } = planRelevantFiles(project.rootPath, taskText, { symbolIndex, recentCommits });
+  const { keywords, candidates } = planRelevantFiles(project.rootPath, taskText, {
+    symbolIndex,
+    recentCommits,
+    includePaths,
+  });
 
   // Semilla de archivos para Context Compaction (contextCompaction.ts):
   // top-N por score, contenido COMPLETO (truncado solo por el límite de
   // tamaño de fileReading.ts) — compactContextPack decide después, según
-  // el tamaño real del pack, si hace falta recortar más.
+  // el tamaño real del pack, si hace falta recortar más. Los candidatos
+  // `--include` ya vienen primero en `candidates` (ver el comparador en
+  // relevancePlanner.ts), así que entran acá aunque `maxFiles` sea chico.
   const rawFiles: CompactableFile[] = [];
+  const includedRelPaths = new Set<string>();
   for (const candidate of candidates.slice(0, maxFiles)) {
     const content = safeReadTextFile(candidate.absPath);
     if (content === null) continue; // desapareció o es binario entre el escaneo y ahora — se omite, no se rompe el pack
@@ -166,8 +178,37 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     // (contextCompaction.ts, estrategia 1) pueda extraer símbolos contra
     // el archivo completo, nunca contra `content` ya truncado — ver el
     // comentario en la interfaz `CompactableFile`.
-    rawFiles.push({ path: candidate.relPath, content: truncateForPack(content), rawContent: content, score });
+    //
+    // Un archivo `--include` NUNCA se trunca por tamaño (bug real
+    // encontrado en sesión 13, justo probando esta misma pieza): el
+    // usuario lo pidió explícitamente porque necesita generar un patch
+    // SEARCH/REPLACE contra su contenido real, y `truncateForPack` corta
+    // el archivo a la mitad insertando un comentario de aviso — una IA
+    // puede copiar ese comentario tal cual dentro de un bloque SEARCH
+    // (no distingue "este texto es un aviso de DevPilot" de "esto es
+    // código real"), lo que garantiza un `reject` en `devpilot import`
+    // porque ese comentario nunca existió en el archivo real. Otros
+    // archivos del pack (los que entraron por score, no por --include)
+    // siguen truncándose igual que antes — el límite de tamaño sigue
+    // siendo necesario para no inflar el pack sin límite.
+    const isExplicitInclude = candidate.reasons.some((r) => r.kind === 'explicit-include');
+    rawFiles.push({
+      path: candidate.relPath,
+      content: isExplicitInclude ? content : truncateForPack(content),
+      rawContent: content,
+      score,
+    });
+    includedRelPaths.add(candidate.relPath);
   }
+
+  // `--include` que pidieron una ruta pero no se pudo leer (no existe, es
+  // binaria, o — caso raro — quedó fuera de `maxFiles` porque hay más
+  // `--include` que cupo) — "fail explicit, nunca silencioso" (mismo
+  // principio que clipboard.ts y el resto del proyecto): el caller avisa,
+  // no se traga el problema.
+  const missingIncludePaths = includePaths
+    .map((raw) => normalizeIncludePath(project.rootPath, raw))
+    .filter((relPath) => !includedRelPaths.has(relPath));
 
   const sessionMemoryText = sessionMemory
     ? [
@@ -233,5 +274,5 @@ export function buildContextPack(params: BuildContextPackParams): BuildContextPa
     ...(compaction.compaction ? { compaction: compaction.compaction } : {}),
   };
 
-  return { pack, candidateCount: candidates.length, keywords };
+  return { pack, candidateCount: candidates.length, keywords, missingIncludePaths };
 }

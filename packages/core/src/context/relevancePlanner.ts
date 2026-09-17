@@ -80,6 +80,26 @@ export interface PlanOptions {
   symbolIndex?: SymbolIndexEntry[];
   /** Nivel 4 (04, Incremento 3): ya obtenidos por el caller vía `GitAdapter.log()` (ver contextService.ts). `undefined`/vacío → Nivel 4 no aporta nada. */
   recentCommits?: GitCommit[];
+  /**
+   * `--include <ruta>` en `devpilot context` (07, sesión 13, "uso real"):
+   * rutas (absolutas o relativas al proyecto, cualquier separador) que
+   * deben entrar al Context Pack sí o sí, sin importar cuánto matcheen por
+   * keywords. Bug real encontrado usando DevPilot contra Camino al
+   * Deporte: al pedir "refactorizar X.tsx siguiendo el patrón Y", X.tsx
+   * (el archivo que TODAVÍA no tiene el vocabulario del patrón: types,
+   * hook, api...) perdía el ranking contra los archivos que YA lo tienen
+   * (los ejemplos del patrón ya aplicado, la doc que lo define) — quedaba
+   * afuera del pack incluso subiendo `--max-files`. No reemplaza al
+   * scoring normal, es una vía explícita aparte para el caso en que el
+   * usuario ya sabe con certeza qué archivo hace falta.
+   */
+  includePaths?: string[];
+}
+
+/** Normaliza una ruta (absoluta o relativa, con cualquier separador) a relativa-POSIX contra `rootPath`, igual formato que `RelevanceCandidate.relPath` en el resto de este archivo. Exportada para que contextPackBuilder.ts pueda detectar, con la MISMA normalización, qué `--include` no terminaron en el pack. */
+export function normalizeIncludePath(rootPath: string, raw: string): string {
+  const abs = path.isAbsolute(raw) ? raw : path.resolve(rootPath, raw);
+  return path.relative(rootPath, abs).split(path.sep).join('/');
 }
 
 function escapeRegExp(s: string): string {
@@ -152,7 +172,8 @@ function finalScore(entry: ScoreEntry): number {
 /** Corre el Context Planner (Nivel 1-4, según qué venga en `options`) sobre `rootPath` para la tarea `taskText`. Devuelve candidatos ordenados por score, cada uno con sus razones — nunca "confía y ya", siempre explicable (ver 04). */
 export function planRelevantFiles(rootPath: string, taskText: string, options: PlanOptions = {}): PlanResult {
   const keywords = extractKeywords(taskText);
-  if (keywords.length === 0) {
+  const hasIncludePaths = Boolean(options.includePaths && options.includePaths.length > 0);
+  if (keywords.length === 0 && !hasIncludePaths) {
     return { keywords, candidates: [] };
   }
 
@@ -296,14 +317,59 @@ export function planRelevantFiles(rootPath: string, taskText: string, options: P
     }
   }
 
-  const candidates: RelevanceCandidate[] = [...scores.entries()]
-    .map(([relPath, entry]) => ({
-      relPath,
-      absPath: path.join(rootPath, relPath),
-      score: finalScore(entry),
-      reasons: entry.reasons,
-    }))
-    .sort((a, b) => b.score - a.score);
+  const candidates: RelevanceCandidate[] = [...scores.entries()].map(([relPath, entry]) => ({
+    relPath,
+    absPath: path.join(rootPath, relPath),
+    score: finalScore(entry),
+    reasons: entry.reasons,
+  }));
+
+  // `--include <ruta>` — ver el comentario en `PlanOptions.includePaths`
+  // arriba. Se aplica DESPUÉS de Nivel 1-4 (nunca reemplaza ese scoring,
+  // solo garantiza que la ruta pedida entre): si el archivo ya era
+  // candidato, se le sube el score a 100 (sube al tope sin perder sus
+  // razones originales); si no lo era (Nivel 1 lo había descartado por no
+  // tener ninguna coincidencia de texto/ruta), se agrega como candidato
+  // nuevo con esa única razón. Rutas que no corresponden a ningún archivo
+  // real del proyecto se ignoran acá — el caller (contextPackBuilder.ts)
+  // es quien detecta y reporta cuáles no se pudieron incluir de verdad
+  // (ahí es donde se sabe si el archivo se pudo leer o no).
+  if (hasIncludePaths) {
+    const byRelPath = new Map(candidates.map((c) => [c.relPath, c]));
+    for (const rawPath of options.includePaths ?? []) {
+      const relPath = normalizeIncludePath(rootPath, rawPath);
+      const reason: RelevanceReason = {
+        kind: 'explicit-include',
+        weight: 100,
+        detail: 'archivo indicado explícitamente con --include',
+      };
+      const existing = byRelPath.get(relPath);
+      if (existing) {
+        existing.score = 100;
+        existing.reasons = [reason, ...existing.reasons];
+      } else {
+        const added: RelevanceCandidate = {
+          relPath,
+          absPath: path.join(rootPath, relPath),
+          score: 100,
+          reasons: [reason],
+        };
+        candidates.push(added);
+        byRelPath.set(relPath, added);
+      }
+    }
+  }
+
+  // Los `--include` van primero SIEMPRE, aunque empaten en 100 con un
+  // candidato normal (el score ya viene topeado a 100 por `finalScore` —
+  // ver el comentario ahí —, así que un empate real es posible). El orden
+  // por score de abajo solo decide entre candidatos del mismo tipo.
+  candidates.sort((a, b) => {
+    const aIncluded = a.reasons.some((r) => r.kind === 'explicit-include') ? 1 : 0;
+    const bIncluded = b.reasons.some((r) => r.kind === 'explicit-include') ? 1 : 0;
+    if (aIncluded !== bIncluded) return bIncluded - aIncluded;
+    return b.score - a.score;
+  });
 
   return { keywords, candidates };
 }

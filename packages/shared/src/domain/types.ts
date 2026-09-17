@@ -111,7 +111,19 @@ export interface TaskContext {
 }
 
 export interface RelevanceReason {
-  kind: 'text-match' | 'import-distance' | 'path-name' | 'git-recency' | 'symbol-match';
+  kind:
+    | 'text-match'
+    | 'import-distance'
+    | 'path-name'
+    | 'git-recency'
+    | 'symbol-match'
+    // `--include <ruta>` en `devpilot context` (07, sesión 13): el usuario
+    // pidió este archivo explícitamente, sin importar su score por
+    // keywords — caso real encontrado en "uso real": el archivo que hay
+    // que refactorizar casi nunca tiene el vocabulario del patrón
+    // objetivo (types/hook/api ya separados), así que pierde el ranking
+    // contra los ejemplos ya migrados que sí lo tienen.
+    | 'explicit-include';
   weight: number;
   detail: string;
 }

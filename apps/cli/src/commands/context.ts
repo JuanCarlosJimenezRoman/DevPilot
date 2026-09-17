@@ -21,10 +21,23 @@ export function registerContextCommand(program: Command): void {
     )
     .option('--constraint <texto>', 'Restricción de alcance/técnica (repetible)', collect, [])
     .option('--max-files <n>', 'Máximo de archivos a incluir en el pack (compactación)', '8')
+    .option(
+      '--include <ruta>',
+      'Fuerza que este archivo entre al pack completo, sin importar su score de relevancia (repetible). Para cuando ya sabés qué archivo hace falta — ej. el que vas a refactorizar, que casi nunca matchea bien por keywords porque todavía no tiene el vocabulario del patrón objetivo.',
+      collect,
+      [],
+    )
     .action(
       async (
         tarea: string,
-        options: { project: string; confirmed: string[]; open: string[]; constraint: string[]; maxFiles: string },
+        options: {
+          project: string;
+          confirmed: string[];
+          open: string[];
+          constraint: string[];
+          maxFiles: string;
+          include: string[];
+        },
       ) => {
         try {
           // Falla rápido, antes de tocar el planner/lectura de archivos ni
@@ -42,6 +55,7 @@ export function registerContextCommand(program: Command): void {
             openDecisions: options.open,
             constraints: options.constraint,
             maxFiles: Number.parseInt(options.maxFiles, 10) || undefined,
+            includePaths: options.include,
           });
 
           const { pack } = result;
@@ -51,7 +65,13 @@ export function registerContextCommand(program: Command): void {
             `  Archivos incluidos: ${pack.relevantFiles.length} de ${result.candidateCount} candidato(s) encontrados`,
           );
           for (const file of pack.relevantFiles) {
-            console.log(`    - ${file.path} (${file.score.score}%)`);
+            const forced = file.score.reasons.some((r) => r.kind === 'explicit-include');
+            console.log(`    - ${file.path} (${file.score.score}%)${forced ? '  📌 forzado con --include' : ''}`);
+          }
+          if (result.missingIncludePaths.length > 0) {
+            console.error(
+              `  ✖ No se pudo incluir con --include (no existe en el proyecto o no se pudo leer como texto): ${result.missingIncludePaths.join(', ')}`,
+            );
           }
           console.log(
             `  Tokens estimados: ${pack.tokenEstimate.totalTokens} (${pack.tokenEstimate.classification})`,

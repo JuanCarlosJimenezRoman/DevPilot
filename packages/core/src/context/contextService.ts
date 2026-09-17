@@ -48,6 +48,8 @@ export interface BuildAndPersistContextParams {
   openDecisions?: string[];
   constraints?: string[];
   maxFiles?: number;
+  /** `--include <ruta>` (07, sesión 13) — ver `PlanOptions.includePaths` en relevancePlanner.ts. */
+  includePaths?: string[];
 }
 
 export interface BuildAndPersistContextResult {
@@ -56,6 +58,8 @@ export interface BuildAndPersistContextResult {
   jsonPath: string;
   copiedToClipboard: boolean;
   candidateCount: number;
+  /** `--include` pedidos que no se pudieron incluir de verdad (ver contextPackBuilder.ts) — vacío si todo salió bien o no se pidió ninguno. */
+  missingIncludePaths: string[];
 }
 
 /** `devpilot context "<tarea>"` (ver 07, Incremento 1): corre el Context Planner sobre un proyecto ya registrado (`devpilot project add`) y persiste el Context Pack resultante. */
@@ -177,7 +181,7 @@ export async function buildAndPersistContext(
     content: row.content,
   }));
 
-  const { pack, candidateCount } = buildContextPack({
+  const { pack, candidateCount, missingIncludePaths } = buildContextPack({
     project,
     snapshot,
     taskText: params.taskText,
@@ -193,6 +197,7 @@ export async function buildAndPersistContext(
     recentCommits,
     recentChanges,
     maxFiles: params.maxFiles ?? DEFAULT_MAX_FILES,
+    includePaths: params.includePaths ?? [],
   });
 
   const markdown = renderContextPackMarkdown(pack, project, snapshot);
@@ -297,5 +302,5 @@ export async function buildAndPersistContext(
     knowledgeDocIds: pack.projectKnowledge.map((d) => d.id),
   });
 
-  return { pack, markdownPath, jsonPath, copiedToClipboard, candidateCount };
+  return { pack, markdownPath, jsonPath, copiedToClipboard, candidateCount, missingIncludePaths };
 }
